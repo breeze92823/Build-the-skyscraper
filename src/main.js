@@ -1,5 +1,5 @@
 import { ACESFilmicToneMapping, BoxGeometry, Clock, ConeGeometry, Group, Mesh, PCFSoftShadowMap, PerspectiveCamera, Scene, SRGBColorSpace, Vector3, WebGLRenderer } from 'three'
-import { AUDIO, CAMERA, ELEVATOR, GYM, INSIDE, LAYOUT, NEXT_BUILDING, RANKS, SAVE, SHOP, SPAWN, SPAWN_FACING, SPIN, TOWER, graphicsPreset, RENDER } from './config.js'
+import { AUDIO, CAMERA, ELEVATOR, GOALS, GYM, INSIDE, LAYOUT, NEXT_BUILDING, RANKS, SAVE, SHOP, SPAWN, SPAWN_FACING, SPIN, TOWER, graphicsPreset, RENDER } from './config.js'
 import * as bloxity from './bloxity.js'
 import { install as installInput, inputState, onKey } from './input.js'
 import { installTouch } from './touch.js'
@@ -55,6 +55,7 @@ import * as net from './net.js'
 import { ICONS } from './hudIcons.js'
 import { pointInPolygon } from './shapes.js'
 import * as S from './stats.js'
+import * as goals from './goals.js'
 import { createWarmup } from './warmup.js'
 import { createDetailCull } from './detailCull.js'
 import { createLightGate } from './lightGate.js'
@@ -174,6 +175,9 @@ S.load()
 bloxity.loadingStep('Connecting')
 net.initNet()
 await net.whenLoaded()
+// Goals (the HUD goal card): from the loaded save, counting placed blocks, earnings, Strength and upgrades.
+goals.initGoals()
+goals.wireGoals()
 
 bloxity.loadingStep('Building the site')
 lighting = createLighting(scene, renderer, preset)
@@ -185,6 +189,10 @@ const pit = createPit(scene)
 // in step every frame, below), else from your own save and played locally.
 const tower = createTower(scene, net.towerState() ?? state.tower)
 tower.setReporter(net.sendBuild) // the blocks you place go up as `build` (batched by net.js)
+// Floors are sized to the builders' bags: yours goes up with every `build` (the server sizes the room's floors)
+// and sizes the floors yourself in local play.
+tower.setTripSource(S.tripSize)
+net.setTripSource(S.tripSize)
 net.onBuilt(({ n, builders }) => {
   // The finished building's top builders for the finale; you are 'me' there (it highlights that id).
   const mine = (id) => id === net.mySessionId() || (!!net.myUid() && net.normId(id) === net.myUid())
@@ -576,13 +584,25 @@ tower.on('floor', ({ floor, of, done }) => {
   fx.ring(C.x, y + 0.3, C.z, tower.spec.size * 0.6, tower.spec.size * 1.9, '#7dffa0', 1.1)
   fx.confetti(C.x, y + 1, C.z, done ? 260 : 90, tower.spec.size * 0.6)
   if (helpedFloor) {
-    const bonus = Math.round(floor * TOWER.floorBonus * S.cashMultiplier())
+    // Everyone who helped gets the floor bonus, sized to THEIR income (TOWER.floorIncome s of it), so a
+    // floor pays a new player as much as it feels like to a veteran.
+    const bonus = Math.round(floor * TOWER.floorBonus * S.cashMultiplier() + S.recentIncome() * TOWER.floorIncome)
     S.addCash(bonus)
-    popAtPlayer(`+$${S.short(bonus)}`, '#7dff6b', true)
+    popAtPlayer(`FLOOR BONUS +$${S.short(bonus)}`, '#7dff6b', true)
     game.cash()
+    goals.floorHelped()
   }
   helpedFloor = false
   void of
+})
+// A full brick pile is laid into the floor: dust, a small shock ring, a thud (quieter when far away).
+tower.onPileLaid(({ x, y, z }) => {
+  const d = Math.hypot(x - player.position.x, y - player.position.y, z - player.position.z)
+  if (d > 70) return
+  fx.dust(x, y + 0.2, z, { count: 6, size: 1.4, grow: 2.5, life: 0.9, color: '#d9c7b0', alpha: 0.55, rise: 1.2, push: 2, spread: 0.6, height: 0 })
+  fx.ring(x, y + 0.15, z, 0.6, 3, '#ffd23a', 0.5)
+  fx.sparks(x, y + 0.6, z, { count: 8, colors: ['#ffd23a', '#ffffff'], speed: 4, size: 0.3, life: 0.4 })
+  game.pileLaid(Math.max(0, 1 - d / 70))
 })
 let fireworks = 0
 tower.on('complete', ({ n, name }) => {
@@ -597,7 +617,7 @@ tower.on('complete', ({ n, name }) => {
     S.emit('buildings', 1)
     // Rarer buildings (the Next Building reel) pay a bigger finishing bonus.
     const rarityBonus = NEXT_BUILDING.rarities[tower.spec.def.rarity]?.bonus ?? 1
-    const bonus = Math.round((n + 1) * TOWER.buildingBonus * rarityBonus * S.cashMultiplier())
+    const bonus = Math.round(((n + 1) * TOWER.buildingBonus * S.cashMultiplier() + S.recentIncome() * TOWER.buildingIncome) * rarityBonus)
     S.addCash(bonus)
     finale.after(() => say(`${name} finished! +1 Building, +$${S.short(bonus)}`, true), 300)
     hud.bump('buildings')
@@ -686,6 +706,17 @@ function popAtPlayer(text, color, big = false, height = 2.3) {
   const y = ((1 - screen.y) / 2) * window.innerHeight
   hud.pop(x, y, text, color, big)
 }
+// A goal finished: its cash pops, the card bounces, and the toast says what it made possible.
+goals.onGoal(({ reward, topUp, chest, welcome, bonus }) => {
+  popAtPlayer(`GOAL! +$${S.short(reward)}`, '#7dff6b', true, 2.9)
+  hud.goalDone()
+  hud.bump('cash')
+  sfx.rewardClaim(chest ? 'boost' : 'cash', chest || welcome)
+  if (topUp) say(`Goal done! Exactly enough for ${topUp.name} Lv ${topUp.level}!`, true)
+  else if (welcome) say(`Welcome back! Goal paid x2: +$${S.short(reward)}`, true)
+  else if (bonus) say(`Bonus goal +$${S.short(reward)}. Fresh full-reward goals tomorrow!`, true)
+  if (chest) setTimeout(() => say(`GOAL CHEST! ${GOALS.chest.mult}x ${GOALS.chest.stat === 'cash' ? 'Cash' : GOALS.chest.stat === 'strength' ? 'Strength' : 'Speed'} for ${S.clock(GOALS.chest.time)}`, true), 1200)
+})
 // Blocks placed in the last minute (rank window "your speed" and the rank ETA).
 const placedLog = []
 let elapsedTotal = 0
@@ -708,6 +739,7 @@ let luckyT = 0
 function luckyDrop(drop) {
   if (!drop) return
   S.addCash(drop.cash)
+  S.noteEarned(drop.cash)
   luckyCash += drop.cash
   luckyCoins += drop.coins
 }
@@ -819,6 +851,8 @@ function frame() {
   elapsedTotal = elapsed
   state.playtime += dt
   S.tickTimed(dt)
+  S.tickIncome(dt)
+  goals.tickGoals(dt)
   tickRewards(dt, () => {
     sfx.rewardReady()
     say('A playtime reward is ready! Open DAILY to claim it.', true)
@@ -928,7 +962,9 @@ function frame() {
       flyT -= dt
       if (flyT <= 0) {
         flyT = 0.1
-        fx.flyBlock(back, tmpV.copy(front.pos).setY(front.pos.y + 0.6), 0.38, 1.6)
+        // The block lands on the nearest brick pile (it grows with every throw, however big the floor is).
+        const land = tower.dropBrick(player.position.x, player.position.z, 0.38)
+        fx.flyBlock(back, land ?? tmpV.copy(front.pos).setY(front.pos.y + 0.6), 0.38, 1.6)
         game.place()
         game.placeWide(S.trowelMul())
         if (S.upgradeValue('hands') > 1) game.handsZap()
@@ -1099,6 +1135,7 @@ function frame() {
     freeReady: rewardsUi.freeReady(),
     dailyReady: rewardsUi.anyReady(),
     timed: S.timedList(),
+    goal: goals.goalView(),
     eta,
     muted: isMuted(),
     spins: state.spins.normal + state.spins.golden,
@@ -1195,6 +1232,8 @@ if (import.meta.env.DEV) {
       S.emit('buildings', 0)
     },
     give: (r) => S.grant(r),
+    // Finishes the goal in progress (goals.js).
+    goal: () => goals.__finishGoal(),
     view: (from, to) => (window.__view = from ? [from, to] : null),
     blocks: (n) => tower.addBlocks(n),
     // Plays the Next Building reel for building n (default: the next one) without touching the tower.

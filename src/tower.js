@@ -24,7 +24,8 @@ import { capGeometry, floorGeometry, footprint, offset, pointInPolygon, prismTri
 import { mulberry32, paintConcrete, paintWindows, toTexture } from './textures.js'
 
 // The shared skyscraper everyone on the server builds. Building n has a look from
-// BUILDINGS, a number of floors and a block count per floor (BUILDING_SCALE). Finished
+// BUILDINGS and a number of floors (BUILDING_SCALE); each floor's block count is set when it
+// starts, from the bags of whoever is building (floorNeed: the server's, or yours offline). Finished
 // floors are one InstancedMesh (slab band + curtain-wall glass), the roof is a concrete cap
 // with a glowing green edge, and the floor in progress shows as stone blocks popping onto
 // the roof, filling it from the elevator side outward. Collision: a trimesh prism up to
@@ -60,15 +61,16 @@ export function buildingSpec(n) {
   const S = BUILDING_SCALE
   const def = BUILDINGS[pickBuilding(n)]
   const floors = Math.min(S.floorsMax, S.floorsBase + n * S.floorsPer)
-  const perFloor = []
-  let total = 0
-  for (let f = 0; f < floors; f++) {
-    const b = Math.round((S.blocksBase * Math.pow(S.blockGrowth, n) * (1 + f * S.floorGrowth)) / 10) * 10
-    perFloor.push(b)
-    total += b
-  }
   const size = def.size + Math.min(6, Math.floor(n / BUILDINGS.length) * 2)
-  return { n, def, floors, perFloor, total, size, pts: footprint(def.shape, size) }
+  return { n, def, floors, size, pts: footprint(def.shape, size) }
+}
+// Blocks floor `floor` of building n needs when the builders' bags (blocks one full bag places) add up to
+// `trip`: about BUILDING_SCALE trips of them, never under the minimum. Same rule as the backend tower.ts.
+export function floorNeed(n, floor, trip) {
+  const S = BUILDING_SCALE
+  const trips = Math.min(S.tripsMax, S.tripsBase + n * S.tripsPer)
+  const min = Math.max(1, Math.round(S.minBase * Math.pow(S.minGrowth, n) * (1 + floor * S.floorGrowth)))
+  return Math.max(min, Math.round(Math.min(trips * Math.max(0, trip || 0) * (1 + floor * S.floorGrowth), 1e15)))
 }
 
 const easeOutBack = (t) => {
@@ -91,6 +93,9 @@ export function createTower(scene, saved) {
   let floors = 0 // finished floors
   const contrib = new Map() // id -> { id, name, blocks } placed on the current building
   let floorBlocks = 0 // blocks in the floor being built
+  let need = 1 // blocks the floor being built needs (sized when it starts: floorNeed / the server's `need`)
+  let placedAll = 0 // blocks placed on this building (all floors)
+  let tripOf = () => 0 // fn(): blocks one full bag of yours places (main.js): sizes the floors in local play
   let phase = 'building' // 'building' | 'celebrate' | 'sinking'
   let phaseTime = 0
   let sink = 0 // m sunk so far
@@ -103,7 +108,7 @@ export function createTower(scene, saved) {
   let shared = false
   let reporter = null // fn(n): blocks this player placed (net.sendBuild)
   let builders = null // { n, list } the `built` message: top builders of the building that just finished
-  const srv = { ok: false, n: -1, floors: 0, blocks: 0, phase: '', phaseAt: 0 } // the last server state applied
+  const srv = { ok: false, n: -1, floors: 0, blocks: 0, need: 0, placed: 0, phase: '', phaseAt: 0 } // the last server state applied
   let inflight = [] // { t, n } blocks reported but not yet in the server's state: caps what you may place
   const INFLIGHT_MS = 1500 // ...for this long (a refused report must not block placing for ever)
 
@@ -133,6 +138,170 @@ export function createTower(scene, saved) {
   const popping = [] // { i, t }
   let rising = null // { t } newest floor growing in
   const anchors = {}
+
+  // --- Brick piles (TOWER.pile) -----------------------------------------------------------------------
+  // Feedback that does not depend on the floor's size: every block thrown (yours, or what the server says
+  // others placed) lands as a brick on a pallet pile near the build front; a full pile is "laid" (flattens
+  // into the slab) and starts again. Purely visual: the real progress is floorBlocks / the roof blocks.
+  const P = TOWER.pile
+  const perPile = P.cols * P.rows * P.layers
+  const [BX, BY, BZ] = P.brick
+  const brickGeo = new BoxGeometry(BX * 0.97, BY * 0.95, BZ * 0.97)
+  brickGeo.translate(0, BY / 2, 0)
+  const palletGeo = new BoxGeometry(P.cols * BX + 0.3, 0.18, P.rows * BZ + 0.3)
+  palletGeo.translate(0, 0.09, 0)
+  const pileRoot = new Group()
+  group.add(pileRoot)
+  const bricks = new InstancedMesh(brickGeo, new MeshStandardMaterial({ color: '#c8693f', roughness: 0.8 }), P.count * perPile)
+  bricks.instanceMatrix.setUsage(DynamicDrawUsage)
+  bricks.castShadow = true
+  bricks.frustumCulled = false
+  bricks.count = P.count * perPile
+  const pallets = new InstancedMesh(palletGeo, new MeshStandardMaterial({ color: '#9a6a3a', roughness: 0.9 }), P.count)
+  pallets.instanceMatrix.setUsage(DynamicDrawUsage)
+  pallets.receiveShadow = true
+  pallets.frustumCulled = false
+  pileRoot.add(pallets, bricks)
+  // { cell (index into cells), n (bricks on it), due: [s until each incoming brick lands], pop: [age of each brick], lay (s into laying, -1 = not) }
+  const piles = []
+  for (let i = 0; i < P.count; i++) piles.push({ cell: -1, n: 0, due: [], pop: new Float32Array(perPile).fill(9), lay: -1, x: 0, z: 0, yaw: 0 })
+  const pileListeners = [] // fn({ x, y, z }) world position of a pile that was just laid
+  const pileJit = [] // a fixed small offset / turn per brick slot so piles look hand-stacked
+  {
+    const r = mulberry32(4242)
+    for (let i = 0; i < perPile; i++) pileJit.push([(r() - 0.5) * 0.06, (r() - 0.5) * 0.06, (r() - 0.5) * 0.12])
+  }
+  // Puts every pile on its cell past the build front (a pile the front has reached moves on, laid).
+  function placePiles(reset = false) {
+    const last = cells.length - 1
+    for (let k = 0; k < piles.length; k++) {
+      const p = piles[k]
+      let want
+      if (reset) want = Math.min(last, shown + P.ahead + k * P.spacing)
+      else {
+        // Moves only once the build front has reached it, to the far end of the row of piles.
+        if (p.cell > shown || last < 0) continue
+        let far = shown + P.ahead - P.spacing
+        for (const o of piles) if (o !== p) far = Math.max(far, o.cell)
+        want = Math.min(last, far + P.spacing)
+        if (want === p.cell) continue
+        // It counts as laid where it stood.
+        if (p.n > 0 && p.lay < 0) for (const fn of pileListeners) fn({ x: C.x + p.x, y: roofY(), z: C.z + p.z })
+      }
+      p.n = 0
+      p.due.length = 0
+      p.lay = -1
+      p.cell = want
+      const c = cells[want]
+      if (c) {
+        p.x = c.x
+        p.z = c.z
+        p.yaw = ((k * 1.7) % 1) * 0.5 - 0.25
+      }
+    }
+  }
+  // The pile nearest (lx, lz) (local), skipping one being laid when another is free.
+  function nearestPile(lx, lz) {
+    let best = null
+    let bd = Infinity
+    for (const p of piles) {
+      if (p.cell < 0) continue
+      const d = Math.hypot(p.x - lx, p.z - lz) + (p.lay >= 0 ? 1e3 : 0) + (p.n + p.due.length >= perPile ? 50 : 0)
+      if (d < bd) {
+        bd = d
+        best = p
+      }
+    }
+    return best
+  }
+  // Local position of brick slot i on a pile (rows x cols per layer, alternate layers shifted a little).
+  const slotV = new Vector3()
+  function slotPos(p, i) {
+    const layer = Math.floor(i / (P.cols * P.rows))
+    const j = i % (P.cols * P.rows)
+    const cx = (j % P.cols) - (P.cols - 1) / 2
+    const cz = Math.floor(j / P.cols) - (P.rows - 1) / 2
+    const sx = cx * BX + (layer % 2 ? 0.05 : -0.05) + pileJit[i][0]
+    const sz = cz * BZ + pileJit[i][1]
+    const cs = Math.cos(p.yaw)
+    const sn = Math.sin(p.yaw)
+    return slotV.set(p.x + sx * cs - sz * sn, 0.18 + layer * BY, p.z + sx * sn + sz * cs)
+  }
+  // A brick headed for the pile nearest world (x, z), landing in `delay` s. Returns the world point it lands
+  // on (the top of that pile) for the flying-block effect, or null when there is nothing to build.
+  const dropV = new Vector3()
+  function dropBrick(x, z, delay = 0) {
+    if (phase !== 'building' || !spec) return null
+    const p = nearestPile(x - C.x, z - C.z)
+    if (!p) return null
+    const i = Math.min(perPile - 1, p.n + p.due.length)
+    p.due.push(delay)
+    const s = slotPos(p, i)
+    return dropV.set(C.x + s.x, roofY() + s.y + BY / 2, C.z + s.z)
+  }
+  // Blocks other players placed (shared mode): a few bricks drop onto a random pile from above.
+  function othersPlaced(n) {
+    if (!(n > 0) || phase !== 'building') return
+    const k = Math.min(6, Math.ceil(Math.log2(n + 1)))
+    const free = piles.filter((p) => p.cell >= 0 && p.lay < 0)
+    if (!free.length) return
+    const p = free[Math.floor(Math.random() * free.length)]
+    for (let i = 0; i < k; i++) p.due.push(i * 0.08)
+  }
+  const pm = new Matrix4()
+  const pq = new Quaternion()
+  const pe = new Euler()
+  const ps = new Vector3()
+  const hidden = new Matrix4().makeScale(0, 0, 0)
+  function updatePiles(dt) {
+    const on = phase === 'building' && !!spec
+    pileRoot.visible = on
+    if (!on) return
+    for (let k = 0; k < piles.length; k++) {
+      const p = piles[k]
+      // Incoming bricks land.
+      for (let d = p.due.length - 1; d >= 0; d--) {
+        p.due[d] -= dt
+        if (p.due[d] > 0) continue
+        p.due.splice(d, 1)
+        if (p.lay >= 0) continue
+        if (p.n < perPile) p.pop[p.n++] = 0
+        if (p.n >= perPile) p.lay = 0
+      }
+      // Laying: the pile flattens into the slab, then it is empty again.
+      let squash = 1
+      if (p.lay >= 0) {
+        p.lay += dt
+        const t = Math.min(1, p.lay / P.layTime)
+        squash = 1 - t * t
+        if (t >= 1) {
+          for (const fn of pileListeners) fn({ x: C.x + p.x, y: roofY(), z: C.z + p.z })
+          p.n = 0
+          p.lay = -1
+          squash = 1
+        }
+      }
+      pq.setFromEuler(pe.set(0, p.yaw, 0))
+      pallets.setMatrixAt(k, p.cell < 0 ? hidden : pm.compose(ps.set(p.x, 0, p.z), pq, tmpS1.set(1, 1, 1)))
+      for (let i = 0; i < perPile; i++) {
+        const idx = k * perPile + i
+        if (i >= p.n || p.cell < 0) {
+          bricks.setMatrixAt(idx, hidden)
+          continue
+        }
+        p.pop[i] += dt
+        const t = Math.min(1, p.pop[i] / 0.22)
+        const s = Math.max(0.01, easeOutBack(t))
+        const at = slotPos(p, i)
+        at.y = at.y * squash + (1 - t) * 0.9
+        pq.setFromEuler(pe.set(0, p.yaw + pileJit[i][2], 0))
+        bricks.setMatrixAt(idx, pm.compose(at, pq, tmpS1.set(s, s * Math.max(0.05, squash), s)))
+      }
+    }
+    pallets.instanceMatrix.needsUpdate = true
+    bricks.instanceMatrix.needsUpdate = true
+  }
+  const tmpS1 = new Vector3()
   // The lobby (open phase): floor top, ceiling, the glass panels cut away for the door.
   const lobbyY0 = TOWER.foundation + TOWER.slab
   const lobbyY1 = TOWER.foundation + INSIDE.floors * TOWER.floorHeight
@@ -358,7 +527,11 @@ export function createTower(scene, saved) {
     builders = null
     spec = buildingSpec(n)
     floors = keep ? Math.min(keep.floors, spec.floors) : 0
-    floorBlocks = keep ? Math.min(keep.blocks, spec.perFloor[floors] ?? 0) : 0
+    // The floor's size: the server's (shared), else sized to your bag now; a saved floor bigger than that
+    // just needs one more block.
+    need = keep?.need > 0 ? keep.need : floorNeed(n, floors, tripOf())
+    floorBlocks = keep ? Math.max(0, Math.min(keep.blocks || 0, keep?.need > 0 ? need : need - 1)) : 0
+    placedAll = keep?.placed > 0 ? keep.placed : floorBlocks
     phase = floors >= spec.floors ? 'celebrate' : 'building'
     phaseTime = 0
     sink = 0
@@ -400,6 +573,8 @@ export function createTower(scene, saved) {
 
     computeAnchors()
     computeCells()
+    shown = 0
+    placePiles(true)
     blocks = new InstancedMesh(blockGeo, blockMaterial(), Math.max(1, cells.length))
     blocks.instanceMatrix.setUsage(DynamicDrawUsage)
     blocks.castShadow = true
@@ -431,18 +606,23 @@ export function createTower(scene, saved) {
     roof.position.y = y + 0.02
     edge.position.y = y + 0.05
     blocks.position.y = y + 0.02
+    pileRoot.position.y = y + 0.02
     roof.visible = floors > 0
   }
   function needNow() {
-    return spec.perFloor[floors] ?? 1
+    return Math.max(1, need)
   }
   // Number of roof blocks that should show for the current floor.
   function syncBlocks(instant = false) {
-    const want = phase === 'building' ? Math.min(cells.length, Math.floor((floorBlocks / needNow()) * cells.length)) : 0
+    // Floors are sized to the builders' bags (floorNeed), so the roof fills in true proportion: one bag of
+    // yours covers a big, visible share of it. At least one block shows once any is placed.
+    const frac = Math.min(1, floorBlocks / needNow())
+    const want = phase === 'building' && floorBlocks > 0 ? Math.min(cells.length, Math.max(1, Math.ceil(frac * cells.length - 1e-6))) : 0
     if (want < shown) {
       shown = want
       blocks.count = shown
       popping.length = 0
+      placePiles(true)
       return
     }
     for (let i = shown; i < want; i++) {
@@ -454,6 +634,7 @@ export function createTower(scene, saved) {
     if (popping.length > 40) finishPops(popping.length - 40)
     if (instant) for (let i = 0; i < shown; i++) blocks.setMatrixAt(i, cells[i].m)
     blocks.instanceMatrix.needsUpdate = true
+    placePiles()
   }
   function finishPops(n) {
     for (let k = 0; k < n; k++) {
@@ -475,6 +656,7 @@ export function createTower(scene, saved) {
       const room = needNow() - floorBlocks
       const put = Math.min(room, left)
       floorBlocks += put
+      placedAll += put
       left -= put
       taken += put
       // Credited before completeFloor: the last block can finish the building, and the
@@ -489,22 +671,18 @@ export function createTower(scene, saved) {
     syncBlocks()
     return taken
   }
-  // Blocks of the current building placed up to (finished floors f, `b` blocks into the next one).
-  function placedAt(f, b) {
-    let p = b
-    for (let i = 0; i < f; i++) p += spec.perFloor[i] ?? 0
-    return p
-  }
   // Shared mode: the number of blocks that still fit in the building (per the latest server state minus
-  // what was reported but is not in it yet) goes to the caller for its bag / cash accounting and up to the
-  // server; the DISPLAYED progress changes only when the server's state comes back (~100 ms later).
+  // what was reported but is not in it yet; floors not started yet are counted at this floor's size, the
+  // server clamps exactly) goes to the caller for its bag / cash accounting and up to the server; the
+  // DISPLAYED progress changes only when the server's state comes back (~100 ms later).
   function addBlocksShared(n, who) {
     if (phase !== 'building' || !(n > 0)) return 0
     const now = performance.now()
     inflight = inflight.filter((e) => now - e.t < INFLIGHT_MS)
     let pending = 0
     for (const e of inflight) pending += e.n
-    const take = Math.min(Math.floor(n), Math.max(0, Math.floor(spec.total - placedAt(floors, floorBlocks) - pending)))
+    const left = needNow() - floorBlocks + Math.max(0, spec.floors - floors - 1) * needNow()
+    const take = Math.min(Math.floor(n), Math.max(0, Math.floor(left - pending)))
     if (take <= 0) return 0
     inflight.push({ t: now, n: take })
     // Kept locally too: the fallback list when the server's `built` message does not arrive.
@@ -522,11 +700,14 @@ export function createTower(scene, saved) {
   function completeFloor() {
     floors++
     floorBlocks = 0
+    // The next floor is sized to who is building now (shared: sync() sets the server's size right after).
+    need = floorNeed(spec.n, floors, tripOf())
     shown = 0
     blocks.count = 0
     popping.length = 0
     floorsMesh.count = floors
     rising = { t: 0, f: floors - 1 }
+    placePiles(true) // the piles were built into the floor that just rose
     syncRoof()
     const done = floors >= spec.floors
     if (done) {
@@ -581,10 +762,12 @@ export function createTower(scene, saved) {
     return { pos: frontV.set(C.x + best.x, roofY(), C.z + best.z), d: bd }
   }
 
+  // `frac` = how much of the building is up (finished floors + the floor in progress), `floorFrac` = the floor
+  // in progress (one bag of yours is a big share of it: floors are sized to the builders' bags).
   const progress = () => {
-    let placed = floorBlocks
-    for (let f = 0; f < floors; f++) placed += spec.perFloor[f]
-    return { placed, total: spec.total, floor: Math.min(floors + 1, spec.floors), floors: spec.floors, floorBlocks, floorNeed: needNow(), done: phase !== 'building' }
+    const floorFrac = phase === 'building' ? Math.min(1, floorBlocks / needNow()) : 1
+    const frac = phase === 'building' ? Math.min(1, (floors + floorFrac) / spec.floors) : 1
+    return { placed: placedAll, frac, floorFrac, floor: Math.min(floors + 1, spec.floors), floors: spec.floors, floorBlocks, floorNeed: needNow(), done: phase !== 'building' }
   }
 
   // --- Frame ----------------------------------------------------------------------------------------
@@ -595,6 +778,7 @@ export function createTower(scene, saved) {
   function update(dt, elapsed, night) {
     phaseTime += dt
     glassMat.emissiveIntensity = night * 1.3
+    updatePiles(dt)
     // Blocks popping in: drop from above with an overshoot.
     if (popping.length) {
       for (let k = popping.length - 1; k >= 0; k--) {
@@ -680,12 +864,13 @@ export function createTower(scene, saved) {
 
   // Raises the shown progress to the server's (`f` finished floors, `b` blocks into the next one), with the
   // normal floor visuals / events for every floor on the way (the last one finishes the building).
-  function advanceTo(f, b) {
+  function advanceTo(f, b, n = 0) {
     while (floors < f && phase === 'building') {
       floorBlocks = needNow()
       completeFloor()
     }
     if (phase === 'building') {
+      if (n > 0) need = n // the server's size for this floor (it can shrink when the room gets weaker)
       floorBlocks = Math.min(b, needNow())
       syncBlocks()
     }
@@ -704,7 +889,7 @@ export function createTower(scene, saved) {
   // at the server's progress. A finished one (celebrate / sinking) shows its crown with the right age.
   function rebuild(ts, age) {
     const building = ts.phase === 'building'
-    setBuilding(ts.n, { floors: building ? ts.floors : 1e9, blocks: building ? ts.blocks : 0 })
+    setBuilding(ts.n, { floors: building ? ts.floors : 1e9, blocks: building ? ts.blocks : 0, need: building ? ts.need : 0, placed: ts.placed })
     if (!building) {
       phaseTime = age
       if (ts.phase === 'sinking') enterSinking(age)
@@ -714,10 +899,10 @@ export function createTower(scene, saved) {
   function sync(ts, now) {
     if (!!ts !== shared) setShared(!!ts)
     if (!ts) return
-    if (srv.ok && ts.n === srv.n && ts.floors === srv.floors && ts.blocks === srv.blocks && ts.phase === srv.phase && ts.phaseAt === srv.phaseAt) return
+    if (srv.ok && ts.n === srv.n && ts.floors === srv.floors && ts.blocks === srv.blocks && ts.need === srv.need && ts.phase === srv.phase && ts.phaseAt === srv.phaseAt) return
     // Blocks of ours the server has counted since the last state are no longer "in flight".
     if (srv.ok && ts.n === srv.n && ts.n === spec.n) {
-      let d = placedAt(ts.floors, ts.blocks) - placedAt(srv.floors, srv.blocks)
+      let d = (ts.placed || 0) - (srv.placed || 0)
       while (d > 0 && inflight.length) {
         const e = inflight[0]
         if (e.n <= d) {
@@ -728,11 +913,15 @@ export function createTower(scene, saved) {
           d = 0
         }
       }
+      // Whatever is left was placed by other players: bricks land on the piles for them too.
+      othersPlaced(d)
     } else inflight = []
     srv.ok = true
     srv.n = ts.n
     srv.floors = ts.floors
     srv.blocks = ts.blocks
+    srv.need = ts.need
+    srv.placed = ts.placed
     srv.phase = ts.phase
     srv.phaseAt = ts.phaseAt
     const age = Math.max(0, (now - ts.phaseAt) / 1000)
@@ -743,7 +932,8 @@ export function createTower(scene, saved) {
     }
     if (ts.phase === 'building') {
       if (phase !== 'building') return rebuild(ts, age) // the server's building is still open: ours was finished early
-      advanceTo(ts.floors, ts.blocks)
+      advanceTo(ts.floors, ts.blocks, ts.need)
+      placedAll = ts.placed || placedAll
       return
     }
     // celebrate / sinking: the building is finished (the last floor goes through the normal visuals if it was not).
@@ -799,6 +989,10 @@ export function createTower(scene, saved) {
     setReporter(fn) {
       reporter = fn
     },
+    // fn() -> blocks one full bag of yours places: sizes each new floor in local play (shared: the server's).
+    setTripSource(fn) {
+      tripOf = typeof fn === 'function' ? fn : () => 0
+    },
     // The server's `built` message for building n: its top builders ({ id, name, blocks }, most first).
     setBuilders(n, list) {
       builders = { n, list: Array.isArray(list) ? list : [] }
@@ -806,6 +1000,11 @@ export function createTower(scene, saved) {
     onRoof,
     cursor,
     nearestFront,
+    // Brick piles: dropBrick(x, z, delay) -> world landing point (or null); onPileLaid(fn({ x, y, z })).
+    dropBrick,
+    onPileLaid(fn) {
+      pileListeners.push(fn)
+    },
     progress,
     update,
     on(name, fn) {
@@ -813,6 +1012,9 @@ export function createTower(scene, saved) {
     },
     // Lift anything standing on the roof when a floor completes (callers pass their own).
     toSave: () => ({ n: spec.n, floors, blocks: floorBlocks }),
+    get floorNeedNow() {
+      return needNow()
+    },
     setBuilding,
     // Keeps the next building from rising for `s` more seconds after this one has sunk.
     hold(s) {

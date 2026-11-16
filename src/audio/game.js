@@ -36,6 +36,16 @@ export function place() {
   burst({ t, noise: 'pink', type: 'lowpass', f: 1800, d: 0.06, gain: 0.08 })
 }
 
+// A full brick pile laid into the floor: a low slump of stone and a small bright ding.
+export function pileLaid(vol = 1) {
+  if (vol < 0.05 || !ok('pile', 250, 0.6, 2)) return
+  const t = now()
+  tone({ t, f: vary(85, 0.08), f2: 45, d: 0.22, gain: 0.32 * vol })
+  burst({ t, noise: 'pink', type: 'lowpass', f: 900, d: 0.25, gain: 0.14 * vol })
+  modal({ t: t + 0.02, f: vary(300, 0.08), modes: STONE, gain: 0.12 * vol, strike: 0.15 })
+  modal({ t: t + 0.12, f: 1568, modes: BELL, gain: 0.05 * vol, verb: 0.2 })
+}
+
 export function bagFull() {
   if (!ok('full', 600, 0.6, 2)) return
   const t = now()

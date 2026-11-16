@@ -72,7 +72,16 @@ export function createHud() {
   const sBuild = stat(ICONS.tower, 'buildings')
   // Running timed boosts (reward prizes): icon, multiplier, time left.
   const timed = el('div', 'hud-timed')
-  left.append(event, sCash.root, sSpeed.root, sStr.root, sBuild.root, timed)
+  // Goal card (goals.js): the personal goal in progress, its bar, its reward and the next chest.
+  const goal = el('div', 'hud-goal', `<div class="hg-head"><span class="hg-title hud-txt">GOAL</span><span class="hg-tag hud-txt"></span></div><div class="hg-text hud-txt"></div><div class="hg-bar"><div></div><span class="hud-txt"></span></div><div class="hg-foot"><span class="hg-reward hud-txt"></span><span class="hg-chest hud-txt"></span></div>`)
+  goal.hidden = true
+  const gTag = goal.querySelector('.hg-tag')
+  const gText = goal.querySelector('.hg-text')
+  const gFill = goal.querySelector('.hg-bar > div')
+  const gNum = goal.querySelector('.hg-bar > span')
+  const gReward = goal.querySelector('.hg-reward')
+  const gChest = goal.querySelector('.hg-chest')
+  left.append(event, sCash.root, sSpeed.root, sStr.root, sBuild.root, goal, timed)
   const TIMED_ICON = { cash: ICONS.cash, strength: ICONS.strength, speed: ICONS.speed }
   let timedKey = ''
   function drawTimed(list = []) {
@@ -229,10 +238,13 @@ export function createHud() {
       // Open (finished) building: the bar counts down the time left to go inside.
       const inside = t.openLeft != null
       // Sinking: the Next Building reel is picking the next one.
-      setText('bar', barText, inside ? `${INSIDE.mult}X INSIDE  ${clock(t.openLeft)}` : t.next ? 'NEXT BUILDING...' : t.done ? 'BUILDING COMPLETE!' : `${commas(t.placed)} / ${commas(t.total)}`)
-      setStyle('barw', barFill, 'width', inside ? '100%' : `${((t.placed / Math.max(1, t.total)) * 100).toFixed(2)}%`)
+      // The bar is the FLOOR in progress (floors are sized to the builders' bags, so one bag of yours moves it
+      // a lot): "FLOOR 3: 84 / 120"; the sub line says how much of the building is up.
+      setText('bar', barText, inside ? `${INSIDE.mult}X INSIDE  ${clock(t.openLeft)}` : t.next ? 'NEXT BUILDING...' : t.done ? 'BUILDING COMPLETE!' : `FLOOR ${t.floor}:  ${commas(t.floorBlocks)} / ${commas(t.floorNeed)}`)
+      setStyle('barw', barFill, 'width', inside || t.done ? '100%' : `${(Math.min(1, t.floorBlocks / Math.max(1, t.floorNeed)) * 100).toFixed(1)}%`)
       bar.classList.toggle('inside', inside)
-      setText('sub', sub, inside ? `${t.name}  ·  Complete` : `${t.name}  ·  Floor ${t.floor}/${t.floors}`)
+      const bp = Math.floor((t.frac ?? 0) * 100)
+      setText('sub', sub, inside ? `${t.name}  ·  Complete` : t.done ? `${t.name}  ·  ${t.floors} floors` : `${t.name}  ·  Floor ${t.floor}/${t.floors}  ·  ${bp}% built`)
       // Event.
       if (s.event) {
         setText('evl', evLabel, 'EVENT')
@@ -276,6 +288,19 @@ export function createHud() {
       bDaily.querySelector('.hb-badge').hidden = !s.dailyReady
       bGift.querySelector('.hb-badge').hidden = true
       drawTimed(s.timed)
+      // Goal card.
+      const gv = s.goal
+      goal.hidden = !gv
+      if (gv) {
+        setText('gtext', gText, gv.text)
+        setStyle('gfill', gFill, 'width', `${(gv.frac * 100).toFixed(1)}%`)
+        setText('gnum', gNum, `${short(gv.have)} / ${short(gv.need)}`)
+        setText('gtag', gTag, gv.tag)
+        goal.classList.toggle('bonus', gv.bonus)
+        goal.classList.toggle('welcome', gv.tag.startsWith('WELCOME'))
+        setText('grew', gReward, '+$' + short(gv.reward))
+        setText('gchest', gChest, gv.bonus ? `NEW GOALS IN ${clock(gv.resetIn)}` : gv.chest === 1 ? 'CHEST NEXT!' : `CHEST IN ${gv.chest}`)
+      }
       // The MENU toggle shows a "!" while a folded-away button has something waiting.
       moreBadge.hidden = right.classList.contains('menu-open') || !(s.freeReady || s.dailyReady || s.spins)
       spinBadge.hidden = !s.spins
@@ -386,6 +411,10 @@ export function createHud() {
     shake(name) {
       const node = name === 'cash' ? sCash.root : name === 'boost' ? boosts : null
       if (node) replay(node, 'shake')
+    },
+    // A goal was just finished: the card pops.
+    goalDone() {
+      restart(goal, 'done')
     },
     bump(name) {
       const node = { cash: sCash.val, strength: sStr.val, speed: sSpeed.val, buildings: sBuild.val, rank: rkDia }[name]

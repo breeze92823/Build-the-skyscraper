@@ -93,7 +93,7 @@ export function createRobotPlayer({ scene, hall, tower, interact, hud, fx, say, 
     const chips = [`${def.blocks}x Blocks Placed`, `${def.build}x Build Speed`, `+${def.walk} Walk Speed`, `+${S.short(def.capacity)} Capacity`]
     chips.forEach((c, i) => setTimeout(() => popAtPlayer(c, i % 2 ? '#7dffe4' : '#ffd23a', true), 120 + i * 220))
     const tips = []
-    if (def.fly) tips.push('Hold Jump to fly!')
+    if (def.fly) tips.push('Hold Jump to fly, C to dive!')
     if (def.ability === 'drop') tips.push('G / the gear button calls the dropship!')
     else if (def.ability) tips.push('G / the gear button to transform!')
     if (tips.length) setTimeout(() => say(tips.join(' '), true), 1100)
@@ -353,7 +353,7 @@ export function createRobotPlayer({ scene, hall, tower, interact, hud, fx, say, 
   function ability() {
     const def = S.gearOn()
     if (!def?.ability) {
-      if (def?.fly) say(`${def.name}: hold Jump to fly!`, true)
+      if (def?.fly) say(`${def.name}: hold Jump to fly, C to dive!`, true)
       else if (def) say(`${def.name} has no special move. Transformers and Titan Armor do!`, false)
       return
     }
@@ -377,7 +377,10 @@ export function createRobotPlayer({ scene, hall, tower, interact, hud, fx, say, 
   const flyHint = document.createElement('div')
   flyHint.hidden = true
   flyHint.innerHTML = '<b>Space</b> Hold to fly'
-  keyList?.prepend(hint, flyHint)
+  const diveHint = document.createElement('div')
+  diveHint.hidden = true
+  diveHint.innerHTML = '<b>C</b> Hold to dive'
+  keyList?.prepend(hint, flyHint, diveHint)
   const hintText = hint.querySelector('span')
   let shownHint = ''
   function updateHint() {
@@ -399,6 +402,7 @@ export function createRobotPlayer({ scene, hall, tower, interact, hud, fx, say, 
     hint.hidden = !text
     hintText.textContent = text
     flyHint.hidden = !canFly
+    diveHint.hidden = !canFly
     document.body.classList.toggle('gear-ability', !!text)
     const btn = document.querySelector('.touch-btn.ability')
     if (btn) btn.textContent = short || 'G'

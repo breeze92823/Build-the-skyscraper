@@ -24,9 +24,9 @@ const FLOOR_Y = 0.3
 // The floating card over a pedestal: name, stats, ability and the price / owned pill.
 function abilityText(def) {
   if (def.ability === 'transform') return 'PRESS G: ROBOT ⇄ VEHICLE!'
-  if (def.ability === 'fly') return 'PRESS G: JET MODE · HOLD JUMP TO FLY!'
-  if (def.ability === 'drop') return 'G: ARMOR DROP · HOLD JUMP TO FLY!'
-  if (def.fly) return 'HOLD JUMP TO FLY!'
+  if (def.ability === 'fly') return 'PRESS G: JET MODE · HOLD JUMP TO FLY · C TO DIVE!'
+  if (def.ability === 'drop') return 'G: ARMOR DROP · HOLD JUMP TO FLY · C TO DIVE!'
+  if (def.fly) return 'HOLD JUMP TO FLY · C TO DIVE!'
   return ''
 }
 function pill(g, x, y, w, h, fill, edge) {
