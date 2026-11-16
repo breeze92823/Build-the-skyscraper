@@ -120,7 +120,12 @@ bloxity.onAdBreak(
 
 // --- Renderer ---------------------------------------------------------------------------------
 const preset = graphicsPreset(bloxity.settings.graphics_quality)
-renderer = new WebGLRenderer({ antialias: preset.antialias, powerPreference: 'high-performance' })
+// With bloom the scene goes through a multisampled HDR target (postfx.js) and the canvas only receives a
+// full-screen quad, so a multisampled canvas on top is wasted memory (and a known source of black
+// rectangles on some GPU drivers): antialias the canvas itself only when there is no bloom chain.
+// 'default' power preference: forcing the discrete GPU makes hybrid laptops copy every frame across GPUs,
+// which is another known cause of black / torn canvas tiles.
+renderer = new WebGLRenderer({ antialias: preset.antialias && !preset.bloom, powerPreference: 'default' })
 renderer.outputColorSpace = SRGBColorSpace
 renderer.toneMapping = ACESFilmicToneMapping
 renderer.toneMappingExposure = RENDER.exposure
