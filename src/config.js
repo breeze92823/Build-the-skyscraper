@@ -428,10 +428,26 @@ export const TOWER = {
   foundation: 0.4, // concrete pad the first floor stands on (walkable step)
   cell: 2.2, // roof grid cell for placed blocks
   block: 1.9, // placed block size
-  floorBonus: 12, // cash x floor number to the player when a floor they helped on completes
-  buildingBonus: 2500, // cash x building number when a tower is finished
+  floorBonus: 12, // cash x floor number to the player when a floor they helped on completes...
+  floorIncome: 15, // ...plus this many seconds of their own recent income (stats.income()), so it always feels worth it
+  buildingBonus: 2500, // cash x building number when a tower is finished...
+  buildingIncome: 90, // ...plus this many seconds of their own recent income (both x the building's rarity bonus)
+  incomeTau: 120, // s: the recent-income average those rewards (and Goals) are measured on
   celebrate: 9, // s the finished tower stands before it is cleared away
   sinkTime: 3.2, // s it takes to sink into the sand
+  // Brick piles on the floor in progress: late floors need millions of blocks, so the laid blocks barely
+  // move. Every block you throw lands on a pile on a pallet near the build front (other players' blocks
+  // land too); a full pile gets "laid" (it flattens into the slab with dust + a thud) and starts again.
+  pile: {
+    count: 4, // piles on the roof
+    ahead: 3, // first pile this many cells past the build front...
+    spacing: 4, // ...and every `spacing` cells after it
+    cols: 2, // bricks per layer: cols x rows
+    rows: 3,
+    layers: 6, // layers before the pile is laid
+    brick: [0.86, 0.42, 0.42], // brick size (x long side, y, z)
+    layTime: 0.5, // s the laid pile takes to flatten
+  },
 }
 // Once a building is finished it stays open for `time` s: its two lowest floors become a
 // lobby (lobby.js) everyone can walk into through the door on the south face. Inside, Strength
@@ -475,12 +491,18 @@ export const FINALE = {
   },
 }
 
-// Building n (0-based) gets taller and heavier each time: floors = floorsBase + n * floorsPer
-// (max floorsMax); blocks per floor = blocksBase * blockGrowth^n * (1 + floor * floorGrowth).
+// Building n (0-based) gets taller each time: floors = floorsBase + n * floorsPer (max floorsMax).
+// A floor's size is NOT fixed: it is sized to the bags of the room's active builders when the floor
+// starts (backend tower.ts `floorNeed`, client tower.js in local play), so every floor takes about
+// `trips` full bags of the room (tripsBase + n * tripsPer, max tripsMax) however strong the room is,
+// x (1 + floor * floorGrowth) higher up, and never less than minBase * minGrowth^n. A new player's bag
+// is a big, visible chunk of a floor, and floors finish every minute or two. A builder counts as active
+// for `active` s after their last placement; their bag = capacity x gear blocks x Wide Trowel (the
+// `trip` each client reports with its `build` messages). Keep in step with the backend constants.ts.
 // Its look is BUILDINGS[pickBuilding(n)] (tower.js): building 0 is always the first one, every
 // later one is a weighted roll on `chance` (seeded by n, so a reload keeps the same pick),
 // shown by the Next Building reel (nextBuilding.js). `rarity` is a NEXT_BUILDING.rarities key.
-export const BUILDING_SCALE = { floorsBase: 18, floorsPer: 6, floorsMax: 70, blocksBase: 220, blockGrowth: 2.15, floorGrowth: 0.05 }
+export const BUILDING_SCALE = { floorsBase: 8, floorsPer: 2, floorsMax: 40, tripsBase: 1.2, tripsPer: 0.12, tripsMax: 3, minBase: 30, minGrowth: 1.08, floorGrowth: 0.03, active: 90 }
 export const BUILDINGS = [
   { name: 'Crystal Spire', rarity: 'common', chance: 26, shape: 'chamfer', size: 21, glass: '#3fd3e6', frame: '#e9f7ff', slab: '#ffffff', base: '#6b3fd1', crown: 'spire', lobby: { name: 'CRYSTAL LOUNGE', carpet: '#123a36', wall: '#16302c', accent: '#3fd3e6', wood: '#8a5a32', sofa: '#f4f1ea', lights: 'chandelier' } },
   { name: 'Wave Towers', rarity: 'common', chance: 22, shape: 'blob', size: 24, glass: '#3f7ff0', frame: '#dfe9ff', slab: '#f4f7ff', base: '#2b3f8f', crown: 'dome', lobby: { name: 'WAVE LOUNGE', carpet: '#132447', wall: '#1a2a52', accent: '#5f9bff', wood: '#6b4a2e', sofa: '#eef2fb', lights: 'ring' } },
@@ -529,7 +551,8 @@ export const STAIRS = { x0: 7, flight: 5.6, width: 2.2, landing: 2.4 }
 export const STATS = {
   startStrength: 10,
   startSpeed: 0,
-  capacity: (strength) => Math.floor(8 + 2.2 * Math.pow(strength, 0.75)),
+  // ^0.6: Strength keeps paying off but no longer snowballs the economy (economy tuning, see UPGRADES).
+  capacity: (strength) => Math.floor(8 + 2.2 * Math.pow(strength, 0.6)),
   walkSpeed: (speed) => Math.min(34, 7 + 3.3 * Math.log(1 + speed / 20)), // m/s
   sprintMul: 1.35,
   fillTime: 7, // s to fill a full bag at Block Grab level 0
@@ -545,22 +568,38 @@ export const STATS = {
 // "before >> after". `color` tints the row, `id` doubles as the icon name in hudIcons.js.
 const fx = (v) => `x${(Math.round(v * 100) / 100).toFixed(2)}`
 const pct = (v) => `${Math.round(v * 10) / 10}%`
+// Economy curve: easy start, hard top. Each upgrade's price runs along a ladder from `first` (level 0)
+// to `last` (its final level), eased by LADDER_EASE (> 1 = the early levels stay cheap and the climb
+// gets steep near the top), rounded to two significant digits so prices read cleanly. Tuned with a
+// Monte Carlo of the whole economy (pit trips, gym, gear, pets, eggs, spins, rewards, goals, buildings):
+// an average player (1 h a day) buys ~30 things in the first 15 minutes and maxes every upgrade after
+// ~37 h of play (~5 weeks); a heavy player in ~2 weeks; nothing in the game shortcuts it with money.
+const LADDER_EASE = 1.5
+export function ladder(first, last, max, ease = LADDER_EASE) {
+  return (l) => {
+    const x = max > 1 ? Math.min(1, l / (max - 1)) : 0
+    const v = first * Math.pow(last / first, Math.pow(x, ease))
+    const mag = Math.pow(10, Math.max(0, Math.floor(Math.log10(v)) - 1))
+    return Math.round(v / mag) * mag
+  }
+}
 export const UPGRADES = [
-  { id: 'grab', name: 'Block Grab', desc: 'Fill your bag faster in the pit', color: 'blue', max: 25, value: (l) => 1 + l * 0.22, fmt: (v) => `${fx(v)} speed`, price: (l) => Math.round(85 * Math.pow(1.55, l)) },
-  { id: 'build', name: 'Build Speed', desc: 'Place blocks faster', color: 'green', max: 25, value: (l) => 1 + l * 0.22, fmt: (v) => `${fx(v)} speed`, price: (l) => Math.round(60 * Math.pow(1.55, l)) },
-  { id: 'range', name: 'Build Range', desc: 'Build from farther away', color: 'cyan', max: 20, value: (l) => 12 + l * 3.5, fmt: (v) => `${Math.round(v * 10) / 10} m`, price: (l) => Math.round(50 * Math.pow(1.6, l)) },
-  { id: 'lift', name: 'Elevator Speed', desc: 'Ride the elevator faster', color: 'yellow', max: 20, value: (l) => 9 * (1 + l * 0.3), fmt: (v) => `${fx(v / 9)} speed`, price: (l) => Math.round(100 * Math.pow(1.55, l)) },
+  { id: 'grab', name: 'Block Grab', desc: 'Fill your bag faster in the pit', color: 'blue', max: 25, value: (l) => 1 + l * 0.22, fmt: (v) => `${fx(v)} speed`, price: ladder(40, 1.6e12, 25) },
+  { id: 'build', name: 'Build Speed', desc: 'Place blocks faster', color: 'green', max: 25, value: (l) => 1 + l * 0.22, fmt: (v) => `${fx(v)} speed`, price: ladder(30, 1.4e12, 25) },
+  { id: 'range', name: 'Build Range', desc: 'Build from farther away', color: 'cyan', max: 20, value: (l) => 12 + l * 3.5, fmt: (v) => `${Math.round(v * 10) / 10} m`, price: ladder(25, 1.1e11, 20) },
+  { id: 'lift', name: 'Elevator Speed', desc: 'Ride the elevator faster', color: 'yellow', max: 20, value: (l) => 9 * (1 + l * 0.3), fmt: (v) => `${fx(v / 9)} speed`, price: ladder(50, 1.6e11, 20) },
   // Lucky drops: every block you place has a Fortune Luck % chance to drop coins, Golden Touch
   // sets how many coins (each worth LUCKY.coinValue x your cash multiplier).
-  { id: 'golden', name: 'Golden Touch', desc: 'More coins in every lucky drop', color: 'yellow', max: 10, value: (l) => 3 + l, fmt: (v) => `${v} coins`, price: (l) => Math.round(100 * Math.pow(1.7, l)) },
-  { id: 'fortune', name: 'Fortune Luck', desc: 'Blocks drop coins more often', color: 'green', max: 15, value: (l) => 5 + l, fmt: (v) => pct(v), price: (l) => Math.round(100 * Math.pow(1.6, l)) },
+  { id: 'golden', name: 'Golden Touch', desc: 'More coins in every lucky drop', color: 'yellow', max: 10, value: (l) => 3 + l, fmt: (v) => `${v} coins`, price: ladder(150, 1.1e9, 10) },
+  { id: 'fortune', name: 'Fortune Luck', desc: 'Blocks drop coins more often', color: 'green', max: 15, value: (l) => 5 + l, fmt: (v) => pct(v), price: ladder(200, 2.8e9, 15) },
   // Combo: keep placing and your cash multiplier climbs up to this value (see COMBO).
-  { id: 'combo', name: 'Coin Combo', desc: 'Keep placing blocks: cash builds up', color: 'orange', max: 12, value: (l) => 1 + l * 0.25, fmt: (v) => fx(v), price: (l) => Math.round(25000 * Math.pow(1.8, l)) },
-  { id: 'trowel', name: 'Wide Trowel', desc: 'More blocks with every placement', color: 'blue', max: 10, value: (l) => 1 + l * 0.5, fmt: (v) => fx(v), price: (l) => Math.round(190000 * Math.pow(1.9, l)) },
-  { id: 'hands', name: 'Lightning Hands', desc: 'Place even faster (stacks with Build Speed)', color: 'orange', max: 10, value: (l) => 1 + l * 0.1, fmt: (v) => `${Math.round((v - 1) * 100)}% faster`, price: (l) => Math.round(190000 * Math.pow(1.9, l)) },
+  { id: 'combo', name: 'Coin Combo', desc: 'Keep placing blocks: cash builds up', color: 'orange', max: 12, value: (l) => 1 + l * 0.25, fmt: (v) => fx(v), price: ladder(25000, 4.4e11, 12) },
+  { id: 'trowel', name: 'Wide Trowel', desc: 'More blocks with every placement', color: 'blue', max: 10, value: (l) => 1 + l * 0.5, fmt: (v) => fx(v), price: ladder(250000, 1.1e12, 10) },
+  { id: 'hands', name: 'Lightning Hands', desc: 'Place even faster (stacks with Build Speed)', color: 'orange', max: 10, value: (l) => 1 + l * 0.1, fmt: (v) => `${Math.round((v - 1) * 100)}% faster`, price: ladder(250000, 1.1e12, 10) },
 ]
 // Lucky drops (Fortune Luck / Golden Touch): one coin is worth coinValue x cashMultiplier().
-export const LUCKY = { coinValue: 1.5 }
+// (0.5: at max levels a lucky drop adds ~1.3x on top of the block's own cash, not ~4x.)
+export const LUCKY = { coinValue: 0.5 }
 // Coin Combo: while you keep placing blocks the combo fills over `ramp` s of building (from
 // x1 up to the upgrade's value); it holds for `grace` s after you stop, then drains `drain`x as
 // fast as it filled.
@@ -588,8 +627,9 @@ export const GYM = {
     { mult: 50, label: '50x', color: '#2bd96b', need: 25, theme: 'toxic', frame: '#26332b', trim: '#2bd96b', cushion: '#123d22' },
     { mult: 75, label: '75x', color: '#ff7a1a', need: 50, theme: 'solar', frame: '#4a2a12', trim: '#ff8a2a', cushion: '#5e2a08' },
     { mult: 100, label: '100x', color: '#3b6dff', need: 100, theme: 'storm', frame: '#151d40', trim: '#4f86ff', cushion: '#10204f' },
-    { mult: 250, label: '250x ELITE', color: '#ff3dc8', price: 2500000, theme: 'elite', frame: '#1c1022', trim: '#ff3dc8', cushion: '#4d0f3d' },
-    { mult: 500, label: '500x LEGEND', color: '#ffc21a', price: 12000000, theme: 'legend', frame: '#ffcf3a', trim: '#fff2b8', cushion: '#2d1d0a' },
+    // The premium pads are the long-term goals AFTER the upgrades (and Spin Wheel jackpots).
+    { mult: 250, label: '250x ELITE', color: '#ff3dc8', price: 5e12, theme: 'elite', frame: '#1c1022', trim: '#ff3dc8', cushion: '#4d0f3d' },
+    { mult: 500, label: '500x LEGEND', color: '#ffc21a', price: 5e13, theme: 'legend', frame: '#ffcf3a', trim: '#fff2b8', cushion: '#2d1d0a' },
   ],
   // Pad looks. floor: base / alt / line colours for the painted floor (textures.js
   // paintGymFloor), glow = emissive strength of its glowing lines. fx: the pad's ambient
@@ -673,44 +713,45 @@ export const RARITIES = {
   legendary: { name: 'Legendary', color: '#ffbb1a', dark: '#b86a00', level: 4 },
   limited: { name: 'Limited', color: '#ff3d6e', dark: '#9a0f35', level: 5 },
 }
-// Every pet. `bonus` is added to the cash and gym multipliers while equipped (0.2 = +20%).
+// Every pet. `bonus` is added to the CASH multiplier while equipped (0.2 = +20%). Pets no longer boost gym
+// gains: cash -> eggs -> pets -> Strength -> cash was the loop that let players max the game in an hour.
 // `kind` picks the body (pets.js): cat, dog, bunny, bear, fox, mouse, bird, dragon, robot.
 // `c` = [body, belly/face, accent]; `hat` = wears a hard hat.
 export const PETS = [
   // Hazard Egg
-  { id: 'cone_cat', name: 'Cone Cat', egg: 'hazard', rarity: 'common', bonus: 0.05, kind: 'cat', c: ['#ff8a2a', '#fff3e0', '#ffffff'] },
-  { id: 'hardhat_pup', name: 'Hard Hat Pup', egg: 'hazard', rarity: 'uncommon', bonus: 0.1, kind: 'dog', c: ['#e2b07a', '#fff1dc', '#8a5a33'], hat: true },
-  { id: 'bolt_bunny', name: 'Bolt Bunny', egg: 'hazard', rarity: 'rare', bonus: 0.2, kind: 'bunny', c: ['#c9ced6', '#ffffff', '#3fb6ff'] },
-  { id: 'caution_fox', name: 'Caution Fox', egg: 'hazard', rarity: 'epic', bonus: 0.45, kind: 'fox', c: ['#ffcc1a', '#fff8d6', '#1d1d22'], hat: true },
-  { id: 'hazard_dragon', name: 'Hazard Dragon', egg: 'hazard', rarity: 'legendary', bonus: 1, kind: 'dragon', c: ['#ffcc1a', '#1d1d22', '#ff5a1a'] },
+  { id: 'cone_cat', name: 'Cone Cat', egg: 'hazard', rarity: 'common', bonus: 0.02, kind: 'cat', c: ['#ff8a2a', '#fff3e0', '#ffffff'] },
+  { id: 'hardhat_pup', name: 'Hard Hat Pup', egg: 'hazard', rarity: 'uncommon', bonus: 0.03, kind: 'dog', c: ['#e2b07a', '#fff1dc', '#8a5a33'], hat: true },
+  { id: 'bolt_bunny', name: 'Bolt Bunny', egg: 'hazard', rarity: 'rare', bonus: 0.05, kind: 'bunny', c: ['#c9ced6', '#ffffff', '#3fb6ff'] },
+  { id: 'caution_fox', name: 'Caution Fox', egg: 'hazard', rarity: 'epic', bonus: 0.1, kind: 'fox', c: ['#ffcc1a', '#fff8d6', '#1d1d22'], hat: true },
+  { id: 'hazard_dragon', name: 'Hazard Dragon', egg: 'hazard', rarity: 'legendary', bonus: 0.25, kind: 'dragon', c: ['#ffcc1a', '#1d1d22', '#ff5a1a'] },
   // Brick Egg
-  { id: 'brick_bear', name: 'Brick Bear', egg: 'brick', rarity: 'common', bonus: 0.15, kind: 'bear', c: ['#c8553a', '#f0c8a8', '#7a2a1a'] },
-  { id: 'mortar_mouse', name: 'Mortar Mouse', egg: 'brick', rarity: 'uncommon', bonus: 0.3, kind: 'mouse', c: ['#a7acb4', '#e8e4dc', '#ff8fa8'], hat: true },
-  { id: 'clay_cat', name: 'Clay Cat', egg: 'brick', rarity: 'rare', bonus: 0.6, kind: 'cat', c: ['#d9784a', '#ffe0c8', '#8a3a1a'] },
-  { id: 'kiln_fox', name: 'Kiln Fox', egg: 'brick', rarity: 'epic', bonus: 1.25, kind: 'fox', c: ['#ff5a2a', '#ffe8c8', '#ffd23a'] },
-  { id: 'brick_titan', name: 'Brick Titan', egg: 'brick', rarity: 'legendary', bonus: 2.5, kind: 'robot', c: ['#b8442a', '#f0c8a8', '#7dff6b'] },
+  { id: 'brick_bear', name: 'Brick Bear', egg: 'brick', rarity: 'common', bonus: 0.04, kind: 'bear', c: ['#c8553a', '#f0c8a8', '#7a2a1a'] },
+  { id: 'mortar_mouse', name: 'Mortar Mouse', egg: 'brick', rarity: 'uncommon', bonus: 0.08, kind: 'mouse', c: ['#a7acb4', '#e8e4dc', '#ff8fa8'], hat: true },
+  { id: 'clay_cat', name: 'Clay Cat', egg: 'brick', rarity: 'rare', bonus: 0.15, kind: 'cat', c: ['#d9784a', '#ffe0c8', '#8a3a1a'] },
+  { id: 'kiln_fox', name: 'Kiln Fox', egg: 'brick', rarity: 'epic', bonus: 0.3, kind: 'fox', c: ['#ff5a2a', '#ffe8c8', '#ffd23a'] },
+  { id: 'brick_titan', name: 'Brick Titan', egg: 'brick', rarity: 'legendary', bonus: 0.6, kind: 'robot', c: ['#b8442a', '#f0c8a8', '#7dff6b'] },
   // Steel Egg
-  { id: 'rivet_rat', name: 'Rivet Rat', egg: 'steel', rarity: 'common', bonus: 0.5, kind: 'mouse', c: ['#8a9099', '#d6dbe2', '#3bd9ff'] },
-  { id: 'steel_pup', name: 'Steel Pup', egg: 'steel', rarity: 'uncommon', bonus: 1, kind: 'dog', c: ['#9aa3ad', '#e6ebf0', '#3a3f48'], hat: true },
-  { id: 'girder_bird', name: 'Girder Bird', egg: 'steel', rarity: 'rare', bonus: 2, kind: 'bird', c: ['#ff6a1a', '#ffe0c0', '#ffd23a'] },
-  { id: 'weld_wolf', name: 'Weld Wolf', egg: 'steel', rarity: 'epic', bonus: 4, kind: 'fox', c: ['#4a505a', '#c9ced6', '#3bd9ff'] },
-  { id: 'chrome_dragon', name: 'Chrome Dragon', egg: 'steel', rarity: 'legendary', bonus: 8, kind: 'dragon', c: ['#d6dde6', '#7d8590', '#3bd9ff'] },
+  { id: 'rivet_rat', name: 'Rivet Rat', egg: 'steel', rarity: 'common', bonus: 0.12, kind: 'mouse', c: ['#8a9099', '#d6dbe2', '#3bd9ff'] },
+  { id: 'steel_pup', name: 'Steel Pup', egg: 'steel', rarity: 'uncommon', bonus: 0.25, kind: 'dog', c: ['#9aa3ad', '#e6ebf0', '#3a3f48'], hat: true },
+  { id: 'girder_bird', name: 'Girder Bird', egg: 'steel', rarity: 'rare', bonus: 0.5, kind: 'bird', c: ['#ff6a1a', '#ffe0c0', '#ffd23a'] },
+  { id: 'weld_wolf', name: 'Weld Wolf', egg: 'steel', rarity: 'epic', bonus: 1, kind: 'fox', c: ['#4a505a', '#c9ced6', '#3bd9ff'] },
+  { id: 'chrome_dragon', name: 'Chrome Dragon', egg: 'steel', rarity: 'legendary', bonus: 2, kind: 'dragon', c: ['#d6dde6', '#7d8590', '#3bd9ff'] },
   // Golden Egg
-  { id: 'gold_bunny', name: 'Gold Bunny', egg: 'golden', rarity: 'common', bonus: 1.5, kind: 'bunny', c: ['#ffd23a', '#fff6c8', '#ff9a1a'] },
-  { id: 'gilded_bear', name: 'Gilded Bear', egg: 'golden', rarity: 'uncommon', bonus: 3, kind: 'bear', c: ['#f0b43a', '#fff0b8', '#a8650a'] },
-  { id: 'crown_cat', name: 'Crown Cat', egg: 'golden', rarity: 'rare', bonus: 6, kind: 'cat', c: ['#ffe066', '#fffbe0', '#ff4f9a'], hat: true },
-  { id: 'treasure_fox', name: 'Treasure Fox', egg: 'golden', rarity: 'epic', bonus: 12, kind: 'fox', c: ['#ffc21a', '#fff4c8', '#2bd96b'] },
-  { id: 'golden_dragon', name: 'Golden Dragon', egg: 'golden', rarity: 'legendary', bonus: 30, kind: 'dragon', c: ['#ffcf3a', '#fff2b0', '#ff3d6e'] },
+  { id: 'gold_bunny', name: 'Gold Bunny', egg: 'golden', rarity: 'common', bonus: 0.4, kind: 'bunny', c: ['#ffd23a', '#fff6c8', '#ff9a1a'] },
+  { id: 'gilded_bear', name: 'Gilded Bear', egg: 'golden', rarity: 'uncommon', bonus: 0.75, kind: 'bear', c: ['#f0b43a', '#fff0b8', '#a8650a'] },
+  { id: 'crown_cat', name: 'Crown Cat', egg: 'golden', rarity: 'rare', bonus: 1.5, kind: 'cat', c: ['#ffe066', '#fffbe0', '#ff4f9a'], hat: true },
+  { id: 'treasure_fox', name: 'Treasure Fox', egg: 'golden', rarity: 'epic', bonus: 3, kind: 'fox', c: ['#ffc21a', '#fff4c8', '#2bd96b'] },
+  { id: 'golden_dragon', name: 'Golden Dragon', egg: 'golden', rarity: 'legendary', bonus: 7.5, kind: 'dragon', c: ['#ffcf3a', '#fff2b0', '#ff3d6e'] },
   // Spin wheel only.
-  { id: 'mech', name: 'Mech', egg: null, rarity: 'limited', bonus: 5, kind: 'robot', c: ['#ffd23a', '#4a505a', '#ff3d3d'] },
+  { id: 'mech', name: 'Mech', egg: null, rarity: 'limited', bonus: 1.25, kind: 'robot', c: ['#ffd23a', '#4a505a', '#ff3d3d'] },
 ]
 // Eggs in the hall. `odds` (%) line up with that egg's pets in PETS order. Every egg costs cash.
 // `side`/`row`: where its pedestal stands (-1 west / +1 east, 0 near the entrance / 1 deeper in).
 export const EGGS = [
-  { id: 'hazard', name: 'Hazard Egg', price: 1000, odds: [55, 28, 11, 5, 1], side: -1, row: 0, color: '#ffcc1a' },
-  { id: 'brick', name: 'Brick Egg', price: 10000, odds: [50, 30, 13, 6, 1], side: 1, row: 0, color: '#d0583a' },
-  { id: 'steel', name: 'Steel Egg', price: 100000, odds: [45, 32, 15, 7, 1], side: -1, row: 1, color: '#9aa3ad' },
-  { id: 'golden', name: 'Golden Egg', price: 1500000, odds: [32, 28, 22, 12, 6], side: 1, row: 1, color: '#ffcf3a' },
+  { id: 'hazard', name: 'Hazard Egg', price: 2000, odds: [55, 28, 11, 5, 1], side: -1, row: 0, color: '#ffcc1a' },
+  { id: 'brick', name: 'Brick Egg', price: 100000, odds: [50, 30, 13, 6, 1], side: 1, row: 0, color: '#d0583a' },
+  { id: 'steel', name: 'Steel Egg', price: 5e8, odds: [45, 32, 15, 7, 1], side: -1, row: 1, color: '#9aa3ad' },
+  { id: 'golden', name: 'Golden Egg', price: 5e11, odds: [32, 28, 22, 12, 6], side: 1, row: 1, color: '#ffcf3a' },
 ]
 export const PET = {
   slots: 3, // pets you can have out at once (+2 with the Pet Slots pass)
@@ -799,17 +840,17 @@ export const SPIN = {
 // `slot` = where the pedestal stands: hall rows by the walkway (side -1 west / 1 east), or the bar.
 export const ROBOT_GEAR = [
   { id: 'jetboots', name: 'Jet Boots', price: 25000, blocks: 1.5, build: 2, walk: 10, capacity: 25, color: '#ff9a1a', glow: '#3bd9ff', row: 0, side: -1, fly: { climb: 8, sink: -2.2 } },
-  { id: 'gauntlets', name: 'Robot Gauntlets', price: 50000, blocks: 2, build: 1.75, walk: 15, capacity: 50, color: '#ffc21a', glow: '#ff7a1a', row: 0, side: 1 },
-  { id: 'arms', name: 'Robotic Arms', price: 100000, blocks: 2, build: 2, walk: 20, capacity: 200, color: '#e8ecf2', glow: '#ffc21a', row: 1, side: -1 },
-  { id: 'mech', name: 'Mech Suit', price: 2500000, blocks: 2.5, build: 2.5, walk: 30, capacity: 750, color: '#ffb81a', glow: '#3bd9ff', row: 1, side: 1, size: 2 },
-  { id: 'blackmech', name: 'Black Mech Suit', price: 7500000, blocks: 3, build: 3, walk: 45, capacity: 1250, color: '#25272e', glow: '#3bd9ff', bar: 0, size: 2, fly: { climb: 11, sink: -3 } },
-  { id: 'mixer', name: 'Mixer Transformer', price: 10000000, blocks: 4, build: 4, walk: 60, capacity: 1600, color: '#2f6fd0', glow: '#ff9a3b', bar: 1, ability: 'transform', vehicle: 'mixer', size: 2 },
-  { id: 'titan', name: 'Titan Armor', price: 50000000, blocks: 8, build: 7, walk: 100, capacity: 3000, color: '#d61f2c', glow: '#ffd23a', bar: 2, ability: 'drop', size: 2, fly: { climb: 14, sink: -3 } },
-  { id: 'truck', name: 'Truck Transformer', price: 20000000, blocks: 5, build: 5, walk: 75, capacity: 2000, color: '#7a3dd1', glow: '#ff5fd2', bar: 3, ability: 'transform', vehicle: 'truck', size: 2 },
-  { id: 'jet', name: 'Jet Transformer', price: 30000000, blocks: 6, build: 6, walk: 90, capacity: 2000, color: '#f2f4f7', glow: '#ffc21a', bar: 4, ability: 'fly', vehicle: 'jet', size: 2 },
+  { id: 'gauntlets', name: 'Robot Gauntlets', price: 75000, blocks: 2, build: 1.75, walk: 15, capacity: 50, color: '#ffc21a', glow: '#ff7a1a', row: 0, side: 1 },
+  { id: 'arms', name: 'Robotic Arms', price: 300000, blocks: 2, build: 2, walk: 20, capacity: 200, color: '#e8ecf2', glow: '#ffc21a', row: 1, side: -1 },
+  { id: 'mech', name: 'Mech Suit', price: 25e6, blocks: 2.5, build: 2.5, walk: 30, capacity: 750, color: '#ffb81a', glow: '#3bd9ff', row: 1, side: 1, size: 2 },
+  { id: 'blackmech', name: 'Black Mech Suit', price: 250e6, blocks: 3, build: 3, walk: 45, capacity: 1250, color: '#25272e', glow: '#3bd9ff', bar: 0, size: 2, fly: { climb: 11, sink: -3 } },
+  { id: 'mixer', name: 'Mixer Transformer', price: 1.5e9, blocks: 4, build: 4, walk: 60, capacity: 1600, color: '#2f6fd0', glow: '#ff9a3b', bar: 1, ability: 'transform', vehicle: 'mixer', size: 2 },
+  { id: 'titan', name: 'Titan Armor', price: 150e9, blocks: 8, build: 7, walk: 100, capacity: 3000, color: '#d61f2c', glow: '#ffd23a', bar: 2, ability: 'drop', size: 2, fly: { climb: 14, sink: -3 } },
+  { id: 'truck', name: 'Truck Transformer', price: 6e9, blocks: 5, build: 5, walk: 75, capacity: 2000, color: '#7a3dd1', glow: '#ff5fd2', bar: 3, ability: 'transform', vehicle: 'truck', size: 2 },
+  { id: 'jet', name: 'Jet Transformer', price: 25e9, blocks: 6, build: 6, walk: 90, capacity: 2000, color: '#f2f4f7', glow: '#ffc21a', bar: 4, ability: 'fly', vehicle: 'jet', size: 2 },
   // LIMITED (on its own red pad outside the hall): stock counts down through each `hours` window from
   // `stock` toward `floor` and restocks when the window ends; `was` is the struck-out list price.
-  { id: 'spider', name: 'Spider Arms', price: 1000000, was: 1500000, blocks: 3, build: 3, walk: 40, capacity: 600, color: '#f2f4f7', glow: '#ff3a4a', spot: 'limited', limited: { stock: 1000, hours: 72, floor: 30 }, carry: true, climb: true },
+  { id: 'spider', name: 'Spider Arms', price: 2e6, was: 3e6, blocks: 3, build: 3, walk: 40, capacity: 600, color: '#f2f4f7', glow: '#ff3a4a', spot: 'limited', limited: { stock: 1000, hours: 72, floor: 30 }, carry: true, climb: true },
 ]
 export const ROBOT = {
   maxWalk: 55, // m/s cap on walk speed with gear
@@ -885,12 +926,35 @@ export const REWARDS = {
   timedMax: 12, // running timed boosts kept at once
 }
 
+// --- Goals (goals.js, the HUD goal card) -------------------------------------------------------------------
+// One short personal goal at a time, sized to YOUR pace (about `minutes` of play: your recent income, bag and
+// gym gain), so everyone finishes one every few minutes. The reward is `rewardSec` seconds of your recent
+// income (at least `minReward`); when the next upgrade costs at most `topUp` x that more than you have, the
+// reward is EXACTLY what it still costs ("Exactly enough for Block Grab Lv 7!"). Every `chestEvery` goals a
+// chest adds a timed boost (`chest`, seconds). The first `perDay` goals of a UTC day pay in full, later ones
+// `afterCap` of it until midnight (come back tomorrow); after `welcome.away` s away the next goal pays
+// `welcome.mult` x. `weights` = how often each kind comes up; `floors` / `reps` size those kinds. Cash only.
+export const GOALS = {
+  minutes: 3,
+  rewardSec: 45,
+  minReward: 25,
+  topUp: 2,
+  chestEvery: 5,
+  chest: { stat: 'cash', mult: 2, time: 300 },
+  perDay: 15,
+  afterCap: 0.25,
+  welcome: { away: 4 * 3600, mult: 2 },
+  floors: 2,
+  reps: 100,
+  weights: { place: 3, earn: 2, floors: 2, strength: 1.5, upgrade: 1 },
+}
+
 // --- Offline rewards: "While You Were Away" (offline.js, offlineUi.js) -----------------------------------
 // Closing the game keeps you training. The SERVER measures the time away (backend src/offline.ts;
 // `min` / `max` here must match OFFLINE_MIN_S / OFFLINE_MAX_S there; guests are timed by their browser):
 // under `min` seconds earns nothing, at most `max` (24 h) is ever paid. `perMinute` = Strength and Speed
 // per minute away at the Free pad (x1); it is multiplied by the best gym pad you can use and by your
-// 2x passes and pets, but NOT by world events or running boosts. Never Gems/Robux.
+// 2x passes, but NOT by world events or running boosts (pets boost cash only). Never Gems/Robux.
 export const OFFLINE = { min: 300, max: 86400, perMinute: 0.07, localKey: 'build-the-skyscraper.away' }
 
 // --- Invite Friends (invite.js; backend src/invite.ts decides who counts) --------------------------------
@@ -900,8 +964,8 @@ export const OFFLINE = { min: 300, max: 86400, perMinute: 0.07, localKey: 'build
 // shapes (cash / boost / gear / egg, granted by stats.grantReward) plus { kind: 'upgrade', id, levels }
 // (id 'all' = every upgrade; capped at each upgrade's max). `scale: true` on cash = x (1 + buildings
 // finished * SPIN.scale), like the spin wheel, so a prize keeps up with the economy late in the game.
-// Never Gems/Robux. Value reference: a spin $15K, Jet Boots $25K, Gauntlets $50K, Steel Egg $100K,
-// Black Mech $7.5M (the daily week already ends on the Mech Suit, so invites top out one step above it).
+// Never Gems/Robux. Value reference: a spin $15K, Jet Boots $25K, Gauntlets $75K, Mech Suit $25M, Black
+// Mech $250M, Steel Egg $500M (the daily week already ends on the Mech Suit, so invites top out one step above it).
 export const INVITE = {
   need: { playtime: 180, blocks: 300 },
   tiers: [

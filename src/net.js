@@ -169,15 +169,18 @@ function keepClock(msg) {
 // The server's clock now (ms): ages the tower's `phaseAt` (how long the lobby has been open, how far it has sunk).
 export const serverNow = () => Date.now() + clockOffset
 
-// { n, floors, blocks, phase, phaseAt, seeded } of the room's tower, or null while not connected or
-// before the room has seeded it (then the tower plays locally). One reused object: read it, don't keep it.
-const towerSnap = { n: 0, floors: 0, blocks: 0, phase: 'building', phaseAt: 0, seeded: true }
+// { n, floors, blocks, need, placed, phase, phaseAt, seeded } of the room's tower, or null while not connected
+// or before the room has seeded it (then the tower plays locally). `need` = the floor's size (the server sized
+// it to the room's bags), `placed` = blocks on this building. One reused object: read it, don't keep it.
+const towerSnap = { n: 0, floors: 0, blocks: 0, need: 0, placed: 0, phase: 'building', phaseAt: 0, seeded: true }
 export function towerState() {
   const t = net.connected ? net.room?.state?.tower : null
   if (!t || !t.seeded) return null
   towerSnap.n = t.n
   towerSnap.floors = t.floors
   towerSnap.blocks = t.blocks
+  towerSnap.need = t.need || 0
+  towerSnap.placed = t.placed || 0
   towerSnap.phase = t.phase
   towerSnap.phaseAt = t.phaseAt
   return towerSnap
@@ -198,7 +201,14 @@ function flushBuild(force = false) {
   buildSentAt = performance.now()
   const blocks = buildAcc
   buildAcc = 0
-  send('build', { blocks })
+  // `trip`: blocks one full bag of ours places. The server sizes the next floors to the room's bags.
+  const trip = Math.max(1, Math.round(tripSource() || 1))
+  send('build', { blocks, trip })
+}
+let tripSource = () => 1
+// fn() -> blocks one full bag of yours places (main.js: capacity x gear blocks x Wide Trowel).
+export function setTripSource(fn) {
+  if (typeof fn === 'function') tripSource = fn
 }
 // fn({ n, name, builders: [{ id, name, blocks }] }) when a building is finished (tower.setBuilders).
 let onBuiltHandler = null

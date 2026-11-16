@@ -795,3 +795,71 @@
   from { transform: scale(0.5); opacity: 0; }
 }
 .ht-chip.wait { opacity: 0.55; filter: saturate(0.4); }
+
+/* Goal card (goals.js) under the stats: the personal goal, its bar, reward and the next chest. */
+.hud-goal {
+  width: calc(300 * var(--u));
+  min-width: 170px;
+  max-width: 44vw;
+  padding: calc(8 * var(--u)) calc(12 * var(--u)) calc(9 * var(--u));
+  border: max(2px, calc(4 * var(--u))) solid #1b1b24;
+  border-radius: calc(16 * var(--u));
+  background: linear-gradient(160deg, rgba(40, 32, 70, 0.92), rgba(22, 20, 34, 0.86));
+  box-shadow: 0 calc(4 * var(--u)) 0 rgba(0, 0, 0, 0.35), inset 0 0 0 max(1px, calc(2 * var(--u))) rgba(255, 210, 58, 0.35);
+  pointer-events: none;
+}
+.hud-goal[hidden] { display: none; }
+.hud-goal.welcome { box-shadow: 0 calc(4 * var(--u)) 0 rgba(0, 0, 0, 0.35), inset 0 0 0 max(2px, calc(3 * var(--u))) #ff7be0; }
+.hud-goal.bonus { opacity: 0.85; }
+.hg-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.hg-title { font-size: max(12px, calc(22 * var(--u))); color: #ffd23a; letter-spacing: 0.06em; }
+.hg-tag { font-size: max(10px, calc(17 * var(--u))); color: #c9b8ff; white-space: nowrap; }
+.hud-goal.welcome .hg-tag { color: #ff9be8; }
+.hg-text { font-size: max(13px, calc(25 * var(--u))); color: #fff; line-height: 1.15; margin: calc(3 * var(--u)) 0 calc(5 * var(--u)); }
+.hg-bar {
+  position: relative;
+  height: max(14px, calc(24 * var(--u)));
+  border: max(2px, calc(3 * var(--u))) solid #111;
+  border-radius: 99px;
+  background: #3a2d22;
+  overflow: hidden;
+}
+.hg-bar > div {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: linear-gradient(#b8ff7a, #4fd65a 60%, #2a9e3a);
+  transition: width 0.25s ease-out;
+}
+.hg-bar > span {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: max(10px, calc(17 * var(--u)));
+  -webkit-text-stroke-width: max(2px, calc(3 * var(--u)));
+}
+.hg-foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: calc(5 * var(--u)); }
+.hg-reward { font-size: max(13px, calc(24 * var(--u))); color: #7dff6b; }
+.hg-chest { font-size: max(10px, calc(16 * var(--u))); color: #ffd23a; white-space: nowrap; }
+.hud-goal.done { animation: hg-done 0.6s cubic-bezier(0.3, 1.6, 0.5, 1); }
+@keyframes hg-done {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.12); filter: brightness(1.6); }
+  100% { transform: scale(1); }
+}
+@media (max-width: 700px), (max-height: 480px) {
+  .hud-goal { width: 170px; min-width: 0; padding: 5px 8px 6px; border-radius: 10px; }
+  .hg-title { font-size: 11px; }
+  .hg-tag { font-size: 9px; -webkit-text-stroke-width: 2px; }
+  .hg-text { font-size: 12px; margin: 1px 0 3px; -webkit-text-stroke-width: 2px; }
+  .hg-bar { height: 13px; border-width: 2px; }
+  .hg-bar > span { font-size: 9px; -webkit-text-stroke-width: 2px; }
+  .hg-reward { font-size: 12px; -webkit-text-stroke-width: 2px; }
+  .hg-chest { font-size: 9px; -webkit-text-stroke-width: 2px; }
+}
+/* Short landscape phones: the stats column already fills the height, so the goal card sits beside it. */
+@media (max-height: 480px) and (orientation: landscape) {
+  .hud-goal { position: absolute; left: calc(100% + 6px); top: 0; width: 160px; }
+}

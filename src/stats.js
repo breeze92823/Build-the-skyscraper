@@ -1,4 +1,4 @@
-import { COMBO, EGGS, GYM, LUCKY, PET, PETS, PET_PASSES, RANKS, RANK_CASH_BONUS, RARITIES, REWARDS, ROBOT, ROBOT_GEAR, SAVE, SHOP, SPIN, STATS, UPGRADES } from './config.js'
+import { COMBO, EGGS, GYM, LUCKY, PET, PETS, PET_PASSES, RANKS, RANK_CASH_BONUS, RARITIES, REWARDS, ROBOT, ROBOT_GEAR, SAVE, SHOP, SPIN, STATS, TOWER, UPGRADES } from './config.js'
 
 // The local player's progress (the one thing that is saved), what it adds up to
 // (capacity, walk speed, rates, multipliers, rank) and a tiny event bus the HUD,
@@ -30,6 +30,8 @@ const fresh = () => ({
   petUid: 1,
   petSlots: 0, // extra pet slots bought (PET.extraSlots)
   spins: { normal: SPIN.start, golden: 0, pity: 0 },
+  // Goals tracker (goals.js): the goal in progress, goals finished ever / on UTC day `day`, last played (ms).
+  goals: { kind: '', need: 0, have: 0, reward: 0, done: 0, day: -1, today: 0, seen: 0 },
 })
 export const state = fresh()
 
@@ -69,6 +71,28 @@ export const buildRate = () => Math.max(STATS.minRate, (capacity() / STATS.build
 export const buildRange = () => upgradeValue('range')
 // Wide Trowel: every block out of the bag places this many blocks (stacks with the worn gear's).
 export const trowelMul = () => upgradeValue('trowel')
+// Blocks one full bag of yours places on the tower (capacity x the worn gear's blocks x Wide Trowel): the
+// `trip` the shared tower sizes its floors to (backend tower.ts floorNeed, tower.js in local play).
+export const tripSize = () => Math.max(1, capacity() * gearBlocks() * trowelMul())
+
+// --- Recent income: what your building has been paying lately ($/s, averaged over TOWER.incomeTau s) --------
+// Floor / building rewards and Goals are measured in seconds of it, so they are worth the same to a brand-new
+// player and to a veteran. Earnings from building only (placed blocks, lucky drops), never from rewards.
+const income = { rate: 0, acc: 0 }
+export const noteEarned = (n) => {
+  if (!(n > 0)) return
+  income.acc += n
+  emit('earned', n) // Goals: "Earn $N building"
+}
+// Every frame.
+export function tickIncome(dt) {
+  if (!(dt > 0)) return
+  const a = 1 - Math.exp(-dt / TOWER.incomeTau)
+  income.rate += (income.acc / dt - income.rate) * a
+  income.acc = 0
+}
+// $/s; never below half of what a bag a minute would pay you now (a fresh session starts at 0).
+export const recentIncome = () => Math.max(income.rate, (tripSize() * cashMultiplier()) / 120)
 
 // --- Coin Combo: placing blocks without a break fills the combo, which multiplies cash --------
 const combo = { t: 0, idle: 0 } // t = 0..1 how full, idle = s since the last block
@@ -119,10 +143,11 @@ export const nextRank = () => RANKS[rankIndex() + 1] ?? null
 export function cashMultiplier() {
   return (1 + rankIndex() * RANK_CASH_BONUS) * (state.passes.cash2 ? 2 : 1) * boosts.eventCash * (1 + petBonus()) * timedMul('cash')
 }
-export const gymMultiplier = (kind) => (kind === 'strength' ? (state.passes.str2 ? 2 : 1) : state.passes.spd2 ? 2 : 1) * boosts.eventGym * (1 + petBonus()) * timedMul(kind)
+// Pets boost cash only (config PETS): never gym gains.
+export const gymMultiplier = (kind) => (kind === 'strength' ? (state.passes.str2 ? 2 : 1) : state.passes.spd2 ? 2 : 1) * boosts.eventGym * timedMul(kind)
 
-// What a rep is worth with no event or running boost on: the 2x pass and the pets (offline training).
-export const gymBaseMultiplier = (kind) => (kind === 'strength' ? (state.passes.str2 ? 2 : 1) : state.passes.spd2 ? 2 : 1) * (1 + petBonus())
+// What a rep is worth with no event or running boost on: the 2x pass (offline training).
+export const gymBaseMultiplier = (kind) => (kind === 'strength' ? (state.passes.str2 ? 2 : 1) : state.passes.spd2 ? 2 : 1)
 // The multiplier of the best gym pad you may use (a premium pad you bought, a pad you won, or one your
 // finished buildings opened): same rule as gym.js tierUnlocked.
 export function bestGymMult() {
@@ -193,7 +218,11 @@ export function placedBlocks(n, { pay = true } = {}) {
   const before = rankIndex()
   state.totalBlocks += n
   emit('placed', n)
-  if (pay) addCash(n * cashMultiplier() * comboMul())
+  if (pay) {
+    const cash = n * cashMultiplier() * comboMul()
+    addCash(cash)
+    noteEarned(cash)
+  }
   const after = rankIndex()
   if (after > before && after > state.rankSeen) {
     state.rankSeen = after
@@ -222,7 +251,7 @@ export function buyPass(id) {
 // --- Pets ----------------------------------------------------------------------------------
 export const petDef = (id) => PETS.find((p) => p.id === id)
 export const eggDef = (id) => EGGS.find((e) => e.id === id)
-// One pet's boost (0.2 = +20% cash and gym gains), with its Golden / Rainbow tier.
+// One pet's boost (0.2 = +20% cash), with its Golden / Rainbow tier.
 export const petPower = (p) => petDef(p.id).bonus * PET.tiers[p.tier ?? 0].mult
 export const petSlots = () => PET.slots + (state.passes.slots ? 2 : 0) + state.petSlots
 // The Pets window's +1 SLOT: the next slot's cash price, or null when all are bought.
@@ -448,7 +477,7 @@ export function grant(reward) {
 // --- Save / load ------------------------------------------------------------------------------
 // The browser save (SAVE.key) is where guests and offline play keep their progress; signed-in
 // players' progress also lives on the server (net.js sends snapshot() and hydrates from it).
-const SAVED = ['cash', 'strength', 'speed', 'totalBlocks', 'buildings', 'bag', 'upgrades', 'passes', 'gymOwned', 'playtime', 'tower', 'rankSeen', 'pets', 'petEq', 'petSeen', 'petUid', 'petSlots', 'spins', 'gear', 'timed', 'rewards', 'freeSteps']
+const SAVED = ['cash', 'strength', 'speed', 'totalBlocks', 'buildings', 'bag', 'upgrades', 'passes', 'gymOwned', 'playtime', 'tower', 'rankSeen', 'pets', 'petEq', 'petSeen', 'petUid', 'petSlots', 'spins', 'gear', 'timed', 'rewards', 'freeSteps', 'goals']
 const OWNER_KEY = `${SAVE.key}.owner`
 
 // Merges a saved object (the browser save or a server doc) into `state`.
@@ -458,6 +487,7 @@ function apply(data) {
     if (k === 'upgrades') Object.assign(state.upgrades, data.upgrades)
     else if (k === 'gear') state.gear = { owned: { ...data.gear?.owned }, on: data.gear?.owned?.[data.gear?.on] ? data.gear.on : null }
     else if (k === 'spins') Object.assign(state.spins, data.spins)
+    else if (k === 'goals') state.goals = { ...state.goals, ...(typeof data.goals === 'object' ? data.goals : {}) }
     else if (k === 'rewards') state.rewards = { ...state.rewards, ...data.rewards, playClaimed: Array.isArray(data.rewards.playClaimed) ? [...data.rewards.playClaimed] : [] }
     else if (k === 'timed') state.timed = Array.isArray(data.timed) ? data.timed.filter((b) => b && b.left > 0 && b.mult > 1).map((b) => ({ stat: b.stat, mult: b.mult, left: b.left })) : []
     else state[k] = data[k]

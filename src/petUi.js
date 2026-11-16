@@ -241,7 +241,7 @@ function createPetWindows({ say }) {
     c.type = 'button'
     c.style.setProperty('--rc', r.color)
     c.style.setProperty('--rd', r.dark)
-    c.title = `${petTitle(def, p.tier)} (${r.name}): ${pct(S.petPower(p))} cash & gym`
+    c.title = `${petTitle(def, p.tier)} (${r.name}): ${pct(S.petPower(p))} cash`
     c.addEventListener('click', () => tapPet(p, c))
     return c
   }
@@ -298,7 +298,7 @@ function createPetWindows({ say }) {
     b.classList.toggle('mode-sell', mode === 'sell')
     b.classList.toggle('mode-delete', mode === 'delete')
     const boost = S.petBonus()
-    const head = el('div', 'pt-top', `<div class="pt-eq pt-txt">EQUIPPED <b>${state.petEq.length}/${S.petSlots()}</b><i>•</i><span class="g">${pct(boost)}</span> Cash <span class="g">${pct(boost)}</span> Gym</div><div class="pt-cap pt-txt">${state.pets.length}/${PET.storage}</div>`)
+    const head = el('div', 'pt-top', `<div class="pt-eq pt-txt">EQUIPPED <b>${state.petEq.length}/${S.petSlots()}</b><i>•</i><span class="g">${pct(boost)}</span> Cash</div><div class="pt-cap pt-txt">${state.pets.length}/${PET.storage}</div>`)
     const tools = el('div', 'pt-tools')
     const slotPrice = S.nextSlotPrice()
     const bBest = uiButton('EQUIP BEST', 'green', () => {
@@ -335,7 +335,7 @@ function createPetWindows({ say }) {
     tools.append(bBest, bDel, bSell, bSlot)
     const grid = el('div', 'pt-grid')
     if (!state.pets.length) {
-      grid.append(el('div', 'pt-empty', 'No pets yet! Hatch eggs in the <b>Egg Hall</b> (south of the road, east of the leaderboard). Equipped pets boost your cash and gym gains.'))
+      grid.append(el('div', 'pt-empty', 'No pets yet! Hatch eggs in the <b>Egg Hall</b> (south of the road, east of the leaderboard). Equipped pets boost your cash.'))
     } else {
       const list = [...state.pets].sort((x, y) => Number(S.isEquipped(y.uid)) - Number(S.isEquipped(x.uid)) || S.petPower(y) - S.petPower(x))
       for (const p of list) grid.append(tile(p))
