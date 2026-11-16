@@ -37,7 +37,19 @@ const skyVertex = /* glsl */ `
   void main() {
     vDir = normalize(position);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    gl_Position.z = gl_Position.w * 0.9999; // pinned just inside the far plane: the dome is never clipped by it
   }`
+
+// Keeps a sky-distance material (stars, clouds) visible however short the camera's far plane is: its
+// depth is pinned just inside the far plane, so real geometry (always nearer) still draws over it.
+export function pinToFarPlane(material, key = 'pinFar') {
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <project_vertex>', '#include <project_vertex>\n gl_Position.z = gl_Position.w * 0.9999;')
+  }
+  material.customProgramCacheKey = () => key
+  material.needsUpdate = true
+}
 const skyFragment = /* glsl */ `
   uniform vec3 top;
   uniform vec3 bottom;
@@ -71,6 +83,7 @@ function makeStars(count = 1400) {
   const geo = new BufferGeometry()
   geo.setAttribute('position', new Float32BufferAttribute(pos, 3))
   const mat = new PointsMaterial({ color: 0xffffff, size: 2, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false, blending: AdditiveBlending })
+  pinToFarPlane(mat, 'pinFarPoints')
   const stars = new Points(geo, mat)
   stars.renderOrder = -1
   return stars
