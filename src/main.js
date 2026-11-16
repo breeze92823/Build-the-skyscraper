@@ -73,6 +73,18 @@ let renderer = null
 let postfx = null
 let fx = null
 
+// Render-size budget. A huge canvas (a big window at DPR 2) plus the multisampled half-float bloom
+// target can exhaust GPU memory; the browser then leaves rectangles of the canvas black while the HTML
+// HUD keeps drawing. So the pixel ratio shrinks until the canvas stays under MAX_RENDER_PIXELS (never
+// below 1).
+const MAX_RENDER_PIXELS = 3_500_000
+let maxDpr = 1
+function pixelRatioFor(limit) {
+  const dpr = Math.min(window.devicePixelRatio || 1, limit)
+  const budget = Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, window.innerWidth * window.innerHeight))
+  return Math.max(1, Math.min(dpr, budget))
+}
+
 function applySetting(key, value) {
   if (key === 'camera_sensitivity') setCameraSensitivity(value)
   else if (key === 'fullscreen') bloxity.requestFullscreen(value)
@@ -80,7 +92,8 @@ function applySetting(key, value) {
   else if (key === 'graphics_quality' && renderer) {
     const next = graphicsPreset(value)
     renderer.shadowMap.enabled = next.shadows
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, next.dpr))
+    maxDpr = next.dpr
+    renderer.setPixelRatio(pixelRatioFor(maxDpr))
     lighting?.setShadows(next)
     postfx?.configure(next)
     setNeonBloom(next.bloom)
@@ -112,8 +125,17 @@ renderer.toneMapping = ACESFilmicToneMapping
 renderer.toneMappingExposure = RENDER.exposure
 renderer.shadowMap.enabled = preset.shadows
 renderer.shadowMap.type = PCFSoftShadowMap
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, preset.dpr))
+maxDpr = preset.dpr
+renderer.setPixelRatio(pixelRatioFor(maxDpr))
 document.body.appendChild(renderer.domElement)
+// A dropped WebGL context (GPU reset, memory pressure) leaves the canvas black: let the browser restore
+// it (preventDefault) and redraw everything three.js still holds when it comes back.
+renderer.domElement.addEventListener('webglcontextlost', (e) => e.preventDefault())
+renderer.domElement.addEventListener('webglcontextrestored', () => {
+  renderer.setPixelRatio(pixelRatioFor(maxDpr))
+  postfx?.configure(graphicsPreset(bloxity.settings.graphics_quality))
+  resize()
+})
 installInput(() => {
   if (!closeTopWindow()) bloxity.showMenu()
 }, renderer.domElement)
@@ -125,6 +147,7 @@ postfx = createPostFx(renderer, scene, camera)
 postfx.configure(preset)
 
 function resize() {
+  renderer.setPixelRatio(pixelRatioFor(maxDpr))
   renderer.setSize(window.innerWidth, window.innerHeight)
   postfx.setSize(window.innerWidth, window.innerHeight)
   camera.aspect = window.innerWidth / window.innerHeight
