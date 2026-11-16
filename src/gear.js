@@ -450,7 +450,7 @@ function roboArm(g, p, side, upper, fx, x, y, z, opts = {}) {
     fingers.push(f)
   }
   marker(wrist, 0, 1.15, 0, fx.claws)
-  fx.arms.push({ yaw, joints, fingers, side, upper, phase: opts.phase ?? ((side > 0) === upper ? 0 : Math.PI), spider: opts.theme === 'spider', yawBase: yaw.rotation.y, climbYaw: opts.climbYaw ?? 0, climbLift: opts.climbLift ?? 1.2 })
+  fx.arms.push({ yaw, joints, fingers, side, upper, phase: opts.phase ?? ((side > 0) === upper ? 0 : Math.PI), spider: opts.theme === 'spider', leg: !!opts.leg, yawBase: yaw.rotation.y, climbYaw: opts.climbYaw ?? 0, climbLift: opts.climbLift ?? 1.2 })
 }
 
 // --- Gear builds --------------------------------------------------------------------------------------------
@@ -538,8 +538,10 @@ function gearParts(id, fx) {
           mesh(g, sphereGeo(0.42), p.dark, s * 1.05, 1.1, -0.25, 0, 0, 0)
           mesh(g, sphereGeo(0.42), p.dark, s * 1.2, -0.95, -0.25, 0, 0, 0)
           for (const y of [0.6, -0.4]) cy(g, 0.07, 0.07, 0.06, chrome(), s * 0.9, y, -0.73, Math.PI / 2, 0, 0, 8)
-          roboArm(g, p, s, true, fx, s * 1.05, 1.15, -0.25)
-          roboArm(g, p, s, false, fx, s * 1.2, -0.95, -0.25)
+          // The arms are the legs: they carry the body and claw up walls (see spiderLeg).
+          const legYaw = s * (Math.PI / 2 - 0.17)
+          roboArm(g, p, s, true, fx, s * 1.05, 1.15, -0.25, { leg: true, climbYaw: legYaw, climbLift: 1.9 })
+          roboArm(g, p, s, false, fx, s * 1.2, -0.95, -0.25, { leg: true, climbYaw: legYaw, climbLift: 0.9 })
         }
       }, 1.6)
       break
@@ -882,7 +884,8 @@ export function wearGear(root, id, { merge = false } = {}) {
       for (const d of fx.spin) d.rotateY(dt * 2.2)
       const walking = (ctx.speed ?? 0) > 1 && !ctx.building
       for (const a of fx.arms) {
-        if (a.spider) {
+        // Spider legs always walk; Robotic Arms walk on all four too, except the upper pair reaches while building.
+        if (a.spider || (a.leg && !(ctx.building && a.upper))) {
           spiderLeg(a, t, ctx)
           continue
         }
