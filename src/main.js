@@ -1,5 +1,5 @@
 import { ACESFilmicToneMapping, BoxGeometry, Clock, ConeGeometry, Group, Mesh, PCFSoftShadowMap, PerspectiveCamera, Scene, SRGBColorSpace, Vector3, WebGLRenderer } from 'three'
-import { AUDIO, CAMERA, ELEVATOR, GOALS, GYM, INSIDE, LAYOUT, NEXT_BUILDING, RANKS, SAVE, SHOP, SPAWN, SPAWN_FACING, SPIN, TOWER, graphicsPreset, RENDER } from './config.js'
+import { AUDIO, BUILDING_SCALE, CAMERA, ELEVATOR, GOALS, GYM, INSIDE, LAYOUT, NEXT_BUILDING, RANKS, SAVE, SHOP, SPAWN, SPAWN_FACING, SPIN, TOWER, graphicsPreset, RENDER } from './config.js'
 import * as bloxity from './bloxity.js'
 import { install as installInput, inputState, onKey } from './input.js'
 import { installTouch } from './touch.js'
@@ -189,8 +189,8 @@ const pit = createPit(scene)
 // in step every frame, below), else from your own save and played locally.
 const tower = createTower(scene, net.towerState() ?? state.tower)
 tower.setReporter(net.sendBuild) // the blocks you place go up as `build` (batched by net.js)
-// Floors are sized to the builders' bags: yours goes up with every `build` (the server sizes the room's floors)
-// and sizes the floors yourself in local play.
+// Floors are sized to the builders' pace; your bag (sent with every `build`) is the first guess at yours (the
+// server sizes the room's floors) and at your own in local play.
 tower.setTripSource(S.tripSize)
 net.setTripSource(S.tripSize)
 net.onBuilt(({ n, builders }) => {
@@ -567,7 +567,18 @@ scene.add(guide)
 let helpedFloor = false
 let helpedBuilding = false
 let roofBefore = tower.roofY
+// When the floor in progress started (for you: the last floor, the new building, or when you arrived). The floor
+// bonus pays per minute the floor took, so a long crowd floor pays as much per minute as a quick solo one.
+let floorStartedAt = performance.now()
+// The minutes this building's floors took (for you), for the building bonus: a crowd's slower building pays
+// as much per minute as a lone player's.
+let bldMins = 0
+let bldFloors = 0
 tower.on('floor', ({ floor, of, done }) => {
+  const floorMins = Math.min(8, Math.max(1, (performance.now() - floorStartedAt) / 60000))
+  floorStartedAt = performance.now()
+  bldMins += floorMins
+  bldFloors++
   const C = tower.center
   const y = tower.roofY
   // Lift whoever stood on the old roof (or in the cage / on the bridge at the top).
@@ -584,9 +595,10 @@ tower.on('floor', ({ floor, of, done }) => {
   fx.ring(C.x, y + 0.3, C.z, tower.spec.size * 0.6, tower.spec.size * 1.9, '#7dffa0', 1.1)
   fx.confetti(C.x, y + 1, C.z, done ? 260 : 90, tower.spec.size * 0.6)
   if (helpedFloor) {
-    // Everyone who helped gets the floor bonus, sized to THEIR income (TOWER.floorIncome s of it), so a
-    // floor pays a new player as much as it feels like to a veteran.
-    const bonus = Math.round(floor * TOWER.floorBonus * S.cashMultiplier() + S.recentIncome() * TOWER.floorIncome)
+    // Everyone who helped gets the floor bonus, sized to THEIR income (TOWER.floorIncome s of it per minute the
+    // floor took), so a floor pays a new player as much as it feels like to a veteran, and a crowd's longer
+    // floors pay as well per minute as a lone player's.
+    const bonus = Math.round(floor * TOWER.floorBonus * S.cashMultiplier() + S.recentIncome() * TOWER.floorIncome * floorMins)
     S.addCash(bonus)
     popAtPlayer(`FLOOR BONUS +$${S.short(bonus)}`, '#7dff6b', true)
     game.cash()
@@ -617,7 +629,9 @@ tower.on('complete', ({ n, name }) => {
     S.emit('buildings', 1)
     // Rarer buildings (the Next Building reel) pay a bigger finishing bonus.
     const rarityBonus = NEXT_BUILDING.rarities[tower.spec.def.rarity]?.bonus ?? 1
-    const bonus = Math.round(((n + 1) * TOWER.buildingBonus * S.cashMultiplier() + S.recentIncome() * TOWER.buildingIncome) * rarityBonus)
+    // Its income part grows with how much longer than a lone player's floors this building's floors took.
+    const slow = Math.min(BUILDING_SCALE.maxMins, Math.max(BUILDING_SCALE.soloMins, bldFloors ? bldMins / bldFloors : 0)) / BUILDING_SCALE.soloMins
+    const bonus = Math.round(((n + 1) * TOWER.buildingBonus * S.cashMultiplier() + S.recentIncome() * TOWER.buildingIncome * slow) * rarityBonus)
     S.addCash(bonus)
     finale.after(() => say(`${name} finished! +1 Building, +$${S.short(bonus)}`, true), 300)
     hud.bump('buildings')
@@ -657,6 +671,9 @@ tower.on('building', () => {
   wasSinking = false
   helpedBuilding = false
   helpedFloor = false
+  floorStartedAt = performance.now()
+  bldMins = 0
+  bldFloors = 0
   roofBefore = tower.roofY
   // The building the reel picked rises: a burst in its rarity's colour.
   const rar = NEXT_BUILDING.rarities[tower.spec.def.rarity] ?? NEXT_BUILDING.rarities.common

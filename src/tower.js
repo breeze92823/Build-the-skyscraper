@@ -25,7 +25,7 @@ import { mulberry32, paintConcrete, paintWindows, toTexture } from './textures.j
 
 // The shared skyscraper everyone on the server builds. Building n has a look from
 // BUILDINGS and a number of floors (BUILDING_SCALE); each floor's block count is set when it
-// starts, from the bags of whoever is building (floorNeed: the server's, or yours offline). Finished
+// starts, from the pace of whoever is building (floorNeed: the server's, or yours offline). Finished
 // floors are one InstancedMesh (slab band + curtain-wall glass), the roof is a concrete cap
 // with a glowing green edge, and the floor in progress shows as stone blocks popping onto
 // the roof, filling it from the elevator side outward. Collision: a trimesh prism up to
@@ -64,13 +64,55 @@ export function buildingSpec(n) {
   const size = def.size + Math.min(6, Math.floor(n / BUILDINGS.length) * 2)
   return { n, def, floors, size, pts: footprint(def.shape, size) }
 }
-// Blocks floor `floor` of building n needs when the builders' bags (blocks one full bag places) add up to
-// `trip`: about BUILDING_SCALE trips of them, never under the minimum. Same rule as the backend tower.ts.
-export function floorNeed(n, floor, trip) {
+// Minutes a floor should take with `builders` people building (backend tower.ts floorMinutes).
+export function floorMinutes(builders) {
   const S = BUILDING_SCALE
-  const trips = Math.min(S.tripsMax, S.tripsBase + n * S.tripsPer)
-  const min = Math.max(1, Math.round(S.minBase * Math.pow(S.minGrowth, n) * (1 + floor * S.floorGrowth)))
-  return Math.max(min, Math.round(Math.min(trips * Math.max(0, trip || 0) * (1 + floor * S.floorGrowth), 1e15)))
+  return Math.min(S.maxMins, S.soloMins + S.crowdMins * (1 - 1 / Math.max(1, builders)))
+}
+// Blocks a floor of building n needs when its builders place `rate` blocks a minute and it should take `mins`
+// minutes, never under the minimum. Same rule as the backend tower.ts.
+export function floorNeed(n, rate, mins) {
+  const S = BUILDING_SCALE
+  const min = Math.max(1, Math.round(S.minBase * Math.pow(S.minGrowth, n)))
+  return Math.max(min, Math.round(Math.min(Math.max(0, rate || 0) * Math.max(0, mins), 1e15)))
+}
+// Your building pace in blocks a minute (backend tower.ts BuildRate): what you placed over the last
+// BUILDING_SCALE.window s; in your first `window` s of building the rest of the window is one full bag
+// (`trip()`) every `tripSecs` s. Sizes the floors in local play.
+function createBuildRate(trip) {
+  let samples = [] // { at, n } ~1 s buckets
+  let sum = 0
+  let first = 0
+  let last = -Infinity
+  const trim = (now) => {
+    const since = now - BUILDING_SCALE.window * 1000
+    while (samples.length && samples[0].at < since) sum -= samples.shift().n
+    if (!samples.length) sum = 0
+  }
+  return {
+    add(blocks, now = performance.now()) {
+      if (now - last > BUILDING_SCALE.active * 1000) {
+        samples = []
+        sum = 0
+        first = now
+      }
+      last = now
+      if (blocks > 0) {
+        const tail = samples[samples.length - 1]
+        if (tail && now - tail.at < 1000) tail.n += blocks
+        else samples.push({ at: now, n: blocks })
+        sum += blocks
+      }
+      trim(now)
+    },
+    perMinute(now = performance.now()) {
+      const S = BUILDING_SCALE
+      if (now - last > S.active * 1000) return (Math.max(1, trip() || 0) * 60) / S.tripSecs // idle / not started: your bag
+      trim(now)
+      const span = Math.min(S.window, Math.max(0, (now - first) / 1000))
+      return (sum * 60) / S.window + (1 - span / S.window) * ((Math.max(1, trip() || 0) * 60) / S.tripSecs)
+    },
+  }
 }
 
 const easeOutBack = (t) => {
@@ -95,7 +137,9 @@ export function createTower(scene, saved) {
   let floorBlocks = 0 // blocks in the floor being built
   let need = 1 // blocks the floor being built needs (sized when it starts: floorNeed / the server's `need`)
   let placedAll = 0 // blocks placed on this building (all floors)
-  let tripOf = () => 0 // fn(): blocks one full bag of yours places (main.js): sizes the floors in local play
+  let tripOf = () => 0 // fn(): blocks one full bag of yours places (main.js): your first-guess pace in local play
+  const pace = createBuildRate(() => tripOf()) // your blocks a minute: sizes the floors in local play (always solo)
+  const localNeed = (n) => floorNeed(n, pace.perMinute(), BUILDING_SCALE.soloMins)
   let phase = 'building' // 'building' | 'celebrate' | 'sinking'
   let phaseTime = 0
   let sink = 0 // m sunk so far
@@ -527,9 +571,9 @@ export function createTower(scene, saved) {
     builders = null
     spec = buildingSpec(n)
     floors = keep ? Math.min(keep.floors, spec.floors) : 0
-    // The floor's size: the server's (shared), else sized to your bag now; a saved floor bigger than that
+    // The floor's size: the server's (shared), else sized to your pace now; a saved floor bigger than that
     // just needs one more block.
-    need = keep?.need > 0 ? keep.need : floorNeed(n, floors, tripOf())
+    need = keep?.need > 0 ? keep.need : localNeed(n)
     floorBlocks = keep ? Math.max(0, Math.min(keep.blocks || 0, keep?.need > 0 ? need : need - 1)) : 0
     placedAll = keep?.placed > 0 ? keep.placed : floorBlocks
     phase = floors >= spec.floors ? 'celebrate' : 'building'
@@ -614,8 +658,8 @@ export function createTower(scene, saved) {
   }
   // Number of roof blocks that should show for the current floor.
   function syncBlocks(instant = false) {
-    // Floors are sized to the builders' bags (floorNeed), so the roof fills in true proportion: one bag of
-    // yours covers a big, visible share of it. At least one block shows once any is placed.
+    // Floors are sized to the builders' pace (floorNeed), so the roof fills in true proportion: alone, one bag
+    // of yours covers a visible share of it. At least one block shows once any is placed.
     const frac = Math.min(1, floorBlocks / needNow())
     const want = phase === 'building' && floorBlocks > 0 ? Math.min(cells.length, Math.max(1, Math.ceil(frac * cells.length - 1e-6))) : 0
     if (want < shown) {
@@ -668,6 +712,7 @@ export function createTower(scene, saved) {
       }
       if (floorBlocks >= needNow()) completeFloor()
     }
+    pace.add(taken)
     syncBlocks()
     return taken
   }
@@ -685,6 +730,7 @@ export function createTower(scene, saved) {
     const take = Math.min(Math.floor(n), Math.max(0, Math.floor(left - pending)))
     if (take <= 0) return 0
     inflight.push({ t: now, n: take })
+    pace.add(take, now)
     // Kept locally too: the fallback list when the server's `built` message does not arrive.
     if (who) {
       const c = contrib.get(who.id)
@@ -700,8 +746,8 @@ export function createTower(scene, saved) {
   function completeFloor() {
     floors++
     floorBlocks = 0
-    // The next floor is sized to who is building now (shared: sync() sets the server's size right after).
-    need = floorNeed(spec.n, floors, tripOf())
+    // The next floor is sized to your pace now (shared: sync() sets the server's size right after).
+    need = localNeed(spec.n)
     shown = 0
     blocks.count = 0
     popping.length = 0
@@ -763,7 +809,7 @@ export function createTower(scene, saved) {
   }
 
   // `frac` = how much of the building is up (finished floors + the floor in progress), `floorFrac` = the floor
-  // in progress (one bag of yours is a big share of it: floors are sized to the builders' bags).
+  // in progress (the HUD shows it as a percentage: floors are sized to the builders' pace and minutes).
   const progress = () => {
     const floorFrac = phase === 'building' ? Math.min(1, floorBlocks / needNow()) : 1
     const frac = phase === 'building' ? Math.min(1, (floors + floorFrac) / spec.floors) : 1
@@ -870,7 +916,7 @@ export function createTower(scene, saved) {
       completeFloor()
     }
     if (phase === 'building') {
-      if (n > 0) need = n // the server's size for this floor (it can shrink when the room gets weaker)
+      if (n > 0) need = n // the server's size for this floor (only its rest can shrink, when the room slows down)
       floorBlocks = Math.min(b, needNow())
       syncBlocks()
     }
@@ -989,7 +1035,7 @@ export function createTower(scene, saved) {
     setReporter(fn) {
       reporter = fn
     },
-    // fn() -> blocks one full bag of yours places: sizes each new floor in local play (shared: the server's).
+    // fn() -> blocks one full bag of yours places: your first-guess pace for the floors in local play (shared: the server's).
     setTripSource(fn) {
       tripOf = typeof fn === 'function' ? fn : () => 0
     },

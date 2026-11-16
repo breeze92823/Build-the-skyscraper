@@ -238,10 +238,12 @@ export function createHud() {
       // Open (finished) building: the bar counts down the time left to go inside.
       const inside = t.openLeft != null
       // Sinking: the Next Building reel is picking the next one.
-      // The bar is the FLOOR in progress (floors are sized to the builders' bags, so one bag of yours moves it
-      // a lot): "FLOOR 3: 84 / 120"; the sub line says how much of the building is up.
-      setText('bar', barText, inside ? `${INSIDE.mult}X INSIDE  ${clock(t.openLeft)}` : t.next ? 'NEXT BUILDING...' : t.done ? 'BUILDING COMPLETE!' : `FLOOR ${t.floor}:  ${commas(t.floorBlocks)} / ${commas(t.floorNeed)}`)
-      setStyle('barw', barFill, 'width', inside || t.done ? '100%' : `${(Math.min(1, t.floorBlocks / Math.max(1, t.floorNeed)) * 100).toFixed(1)}%`)
+      // The bar is the FLOOR in progress as a percentage, "FLOOR 3:  70%": never its block count, so a floor
+      // sized for a bigger crowd (more work) never shows as a bigger number. The sub line says how much of the
+      // building is up.
+      const ff = Math.min(1, t.floorBlocks / Math.max(1, t.floorNeed))
+      setText('bar', barText, inside ? `${INSIDE.mult}X INSIDE  ${clock(t.openLeft)}` : t.next ? 'NEXT BUILDING...' : t.done ? 'BUILDING COMPLETE!' : `FLOOR ${t.floor}:  ${Math.floor(ff * 100)}%`)
+      setStyle('barw', barFill, 'width', inside || t.done ? '100%' : `${(ff * 100).toFixed(1)}%`)
       bar.classList.toggle('inside', inside)
       const bp = Math.floor((t.frac ?? 0) * 100)
       setText('sub', sub, inside ? `${t.name}  ·  Complete` : t.done ? `${t.name}  ·  ${t.floors} floors` : `${t.name}  ·  Floor ${t.floor}/${t.floors}  ·  ${bp}% built`)

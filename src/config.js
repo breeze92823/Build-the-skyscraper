@@ -429,7 +429,8 @@ export const TOWER = {
   cell: 2.2, // roof grid cell for placed blocks
   block: 1.9, // placed block size
   floorBonus: 12, // cash x floor number to the player when a floor they helped on completes...
-  floorIncome: 15, // ...plus this many seconds of their own recent income (stats.income()), so it always feels worth it
+  floorIncome: 15, // ...plus this many seconds of their own recent income PER MINUTE the floor took (main.js, 1-8 min),
+  // so a long crowd floor pays as much per minute as a quick solo one and joining others never costs you
   buildingBonus: 2500, // cash x building number when a tower is finished...
   buildingIncome: 90, // ...plus this many seconds of their own recent income (both x the building's rarity bonus)
   incomeTau: 120, // s: the recent-income average those rewards (and Goals) are measured on
@@ -492,17 +493,21 @@ export const FINALE = {
 }
 
 // Building n (0-based) gets taller each time: floors = floorsBase + n * floorsPer (max floorsMax).
-// A floor's size is NOT fixed: it is sized to the bags of the room's active builders when the floor
-// starts (backend tower.ts `floorNeed`, client tower.js in local play), so every floor takes about
-// `trips` full bags of the room (tripsBase + n * tripsPer, max tripsMax) however strong the room is,
-// x (1 + floor * floorGrowth) higher up, and never less than minBase * minGrowth^n. A new player's bag
-// is a big, visible chunk of a floor, and floors finish every minute or two. A builder counts as active
-// for `active` s after their last placement; their bag = capacity x gear blocks x Wide Trowel (the
-// `trip` each client reports with its `build` messages). Keep in step with the backend constants.ts.
+// A floor's size is NOT fixed: it is set ONCE, when the floor starts, so the floor takes about
+// floorMinutes(builders) of the room's real building (backend tower.ts, the server's call; client tower.js in
+// local play, always solo): `soloMins` (2.5) for one builder, soloMins + crowdMins * (1 - 1/N) for N (4 for
+// two, ~5 for five, ~5.5 for a crowd, never over `maxMins`). So a lone player sees a floor go up every 2-3
+// minutes and a crowd works longer on each one. A builder's pace = the blocks they placed over the last
+// `window` s, blended in their first `window` s with one full bag (`trip`) every `tripSecs` s; a builder
+// counts for `active` s after their last placement. Floor = the builders' summed blocks/min x the floor's
+// minutes (never under minBase * minGrowth^n); the minutes ease `rampUp` / `rampDown` of the way toward the
+// new crowd size each floor. A started floor never grows; if the room slows under `shrinkAt` of the pace it
+// was sized for, only its REMAINING part shrinks. The HUD shows the floor as a percentage, never its size.
+// Keep in step with the backend constants.ts.
 // Its look is BUILDINGS[pickBuilding(n)] (tower.js): building 0 is always the first one, every
 // later one is a weighted roll on `chance` (seeded by n, so a reload keeps the same pick),
 // shown by the Next Building reel (nextBuilding.js). `rarity` is a NEXT_BUILDING.rarities key.
-export const BUILDING_SCALE = { floorsBase: 8, floorsPer: 2, floorsMax: 40, tripsBase: 1.2, tripsPer: 0.12, tripsMax: 3, minBase: 30, minGrowth: 1.08, floorGrowth: 0.03, active: 90 }
+export const BUILDING_SCALE = { floorsBase: 8, floorsPer: 2, floorsMax: 40, soloMins: 2.5, crowdMins: 3, maxMins: 6, rampUp: 0.5, rampDown: 0.75, window: 180, tripSecs: 50, shrinkAt: 0.7, minBase: 30, minGrowth: 1.08, active: 90 }
 export const BUILDINGS = [
   { name: 'Crystal Spire', rarity: 'common', chance: 26, shape: 'chamfer', size: 21, glass: '#3fd3e6', frame: '#e9f7ff', slab: '#ffffff', base: '#6b3fd1', crown: 'spire', lobby: { name: 'CRYSTAL LOUNGE', carpet: '#123a36', wall: '#16302c', accent: '#3fd3e6', wood: '#8a5a32', sofa: '#f4f1ea', lights: 'chandelier' } },
   { name: 'Wave Towers', rarity: 'common', chance: 22, shape: 'blob', size: 24, glass: '#3f7ff0', frame: '#dfe9ff', slab: '#f4f7ff', base: '#2b3f8f', crown: 'dome', lobby: { name: 'WAVE LOUNGE', carpet: '#132447', wall: '#1a2a52', accent: '#5f9bff', wood: '#6b4a2e', sofa: '#eef2fb', lights: 'ring' } },

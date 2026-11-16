@@ -1,7 +1,7 @@
 // Economy Monte Carlo for Build the Skyscraper: how long players of three kinds take to max every upgrade,
 // purchases over time, gaps between purchases, milestones. It plays the economy from src/config.js (pit trips,
 // gym, gear, passes, pets + eggs, spins, daily / playtime / offline rewards, events, Goals, floors sized to the
-// room's bags, income-scaled floor / building bonuses). A model, not the game: re-run it before changing prices
+// room's pace (2.5 min solo, CROWD=n for a room of n), income-scaled floor / building bonuses). A model, not the game: re-run it before changing prices
 // or multipliers. Usage (from Build-the-skyscraper/): node tools/economySim.mjs [runs=12] [casual|average|grinder]
 import fs from 'node:fs'
 import os from 'node:os'
@@ -33,8 +33,9 @@ const PIT_TO_CAGE = 87
 const ROOF_WALK = 12
 const rarityAvg = (() => { let s = 0, w = 0; for (const b of BUILDINGS) { s += b.chance * NEXT_BUILDING.rarities[b.rarity].bonus; w += b.chance } return s / w })()
 const floorsOf = (n) => Math.min(FLOORS.floorsMax, FLOORS.floorsBase + n * FLOORS.floorsPer)
-const tripsOf = (n) => Math.min(FLOORS.tripsMax, FLOORS.tripsBase + n * FLOORS.tripsPer)
-const minNeed = (n, f) => Math.round(FLOORS.minBase * Math.pow(FLOORS.minGrowth, n) * (1 + f * FLOORS.floorGrowth))
+// Minutes a floor takes with `crowd` builders (backend tower.ts floorMinutes): floors are sized to the room's pace.
+const floorMins = (crowd) => Math.min(FLOORS.maxMins, FLOORS.soloMins + FLOORS.crowdMins * (1 - 1 / Math.max(1, crowd)))
+const CROWD = Math.max(1, +(process.env.CROWD ?? 1)) // CROWD=5 node tools/economySim.mjs: building in a room of 5
 
 function run(profileName, seed, opt = {}) {
   const P = { ...PROFILES[profileName], ...opt }
@@ -289,21 +290,22 @@ function run(profileName, seed, opt = {}) {
       continue
     }
     const tr = trip({ ev })
-    // The floor is sized to the room's bags: tripsOf(n) of them (the room = players like you), at least minNeed.
-    const need = Math.max(minNeed(tw.n, tw.floor), tripsOf(tw.n) * tr.placed * (1 + tw.floor * FLOORS.floorGrowth))
-    const share = tr.placed / need // of a floor, from this trip of yours (the others add the same per trip)
+    // The floor is sized to the room's pace so it takes floorMins(CROWD) of building (the room = players like you):
+    // this trip's share of it is the time it took.
+    const mins = floorMins(CROWD)
     let cash = tr.cash
     s.totalBlocks += tr.placed
-    tw.frac += 1 / tripsOf(tw.n) * Math.min(1, tripsOf(tw.n) * share)
+    tw.frac += tr.time / P.eff / (mins * 60)
     if (tw.frac >= 1 - 1e-9) {
       tw.frac = 0
       tw.floor++
       mark('first_floor')
-      cash += income * FLOORS.floorSec + tw.floor * TOWER.floorBonus * cashMul({ ev })
+      // The floor bonus pays floorSec s of income per minute the floor took (main.js).
+      cash += income * FLOORS.floorSec * Math.min(8, Math.max(1, mins)) + tw.floor * TOWER.floorBonus * cashMul({ ev })
       if (tw.floor >= floorsOf(tw.n)) {
         s.buildings++
         mark('building_' + s.buildings)
-        cash += (income * FLOORS.buildingSec + (tw.n + 1) * TOWER.buildingBonus * cashMul({ ev })) * rarityAvg
+        cash += (income * FLOORS.buildingSec * (mins / FLOORS.soloMins) + (tw.n + 1) * TOWER.buildingBonus * cashMul({ ev })) * rarityAvg
         s.spins += SPIN.perBuilding
         tw.n++; tw.floor = 0
         tw.down = INSIDE.time + TOWER.sinkTime + NEXT_BUILDING.spin + NEXT_BUILDING.hold
