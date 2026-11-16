@@ -2,7 +2,7 @@ import { CanvasTexture, CylinderGeometry, Group, Mesh, MeshStandardMaterial, Pla
 
 const tmpV = new Vector3()
 import { LAYOUT, ROBOT, ROBOT_GEAR } from './config.js'
-import { bake } from './bake.js'
+import { bake, bakeStill } from './bake.js'
 import { box, flatText, fontReady, label, neon, solidBox, solidPole, std } from './propkit.js'
 import { makeWorkerBody } from './characters.js'
 import { createEmitter } from './particles.js'
@@ -476,7 +476,7 @@ export function createRobotHall(scene) {
   // The entrance faces the main road: the spot just inside the gate (for the guide / teleports).
   const entrance = { x: cx, z: L.z0 + 3 }
   let limitedT = 0
-  return {
+  const hall = {
     pedestals,
     entrance,
     refresh() {
@@ -521,6 +521,18 @@ export function createRobotHall(scene) {
       }
     },
   }
+
+  // The displays are hundreds of small parts (one draw call each, ~700 with the hall in view). Let
+  // their animation settle (giant suits follow their mannequin with a lag), then merge every part
+  // that stays still through a few runs of it; moving parts (thrusters, arms, wheels, jets) stay live.
+  for (let i = 0; i < 180; i++) hall.update(1 / 60, 0)
+  bakeStill(
+    root.children.filter((c) => !c.isSprite),
+    (i) => {
+      for (let k = 0; k < 3; k++) hall.update(1 / 60, 1.3 + i * 2.71 + k * 0.37)
+    },
+  )
+  return hall
 }
 
 export { ROBOT }
