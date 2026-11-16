@@ -6,7 +6,7 @@
 //   buttons     - jump, sprint (toggle), camera mode, plus day-night/respawn
 import './touch.css'
 import { COARSE_POINTER, TOUCH } from './config.js'
-import { inputState, requestLock, setTouchJump, setTouchMove, setTouchSprint } from './input.js'
+import { inputState, requestLock, setTouchDown, setTouchJump, setTouchMove, setTouchSprint } from './input.js'
 
 const ICONS = {
   day: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>',
@@ -171,7 +171,18 @@ export function installTouch(actions) {
     }),
     // Robot Gear ability (G): shown while the worn gear has one (body.gear-ability).
     button('ability', 'G', () => actions.ability?.()),
+    // Dive while flying (C): shown only while player.fly is set (body.flying), held like JUMP.
+    button('down', 'DOWN', () => setTouchDown(true)),
   )
+  const downBtn = cluster.querySelector('.touch-btn.down')
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) downBtn.addEventListener(type, () => setTouchDown(false))
+  downBtn.addEventListener('pointerdown', (e) => {
+    try {
+      downBtn.setPointerCapture(e.pointerId)
+    } catch {
+      // Ignore.
+    }
+  })
   // Held jump (a jet climbs while it is held).
   const jumpBtn = cluster.querySelector('.touch-btn.jump')
   for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) jumpBtn.addEventListener(type, () => setTouchJump(false))

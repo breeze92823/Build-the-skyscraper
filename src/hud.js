@@ -158,6 +158,7 @@ export function createHud() {
   const rdFill = ride.querySelector('.rd-bar > div')
   ride.hidden = true
   const pops = el('div', 'hud-pops')
+  const recentPops = [] // { x, y, h, t } of pops spawned in the last ~0.5 s (pop() spaces new ones out)
   // A dark strip across the middle of the screen ("The building is complete! Go inside!").
   const notice = el('div', 'hud-notice', '<span class="hud-txt"></span>')
   const noticeText = notice.firstChild
@@ -337,6 +338,17 @@ export function createHud() {
     },
     // A number floating up from a screen point.
     pop(x, y, text, color = '#ffffff', big = false) {
+      // Keep pops that spawn close together from drawing on top of each other: a new pop that lands
+      // on one shown in the last ~0.5 s moves up a line (pops float up, so the lines stay apart).
+      const now = performance.now()
+      const lh = big ? Math.max(26, window.innerWidth * 0.028) : Math.max(19, window.innerWidth * 0.019)
+      while (recentPops.length && now - recentPops[0].t > 520) recentPops.shift()
+      for (let i = 0; i < 6; i++) {
+        const hit = recentPops.find((r) => Math.abs(r.y - y) < (r.h + lh) * 0.5 && Math.abs(r.x - x) < 160)
+        if (!hit) break
+        y = hit.y - (hit.h + lh) * 0.5
+      }
+      recentPops.push({ x, y, h: lh, t: now })
       const p = el('div', `hud-pop hud-txt${big ? ' big' : ''}`, '')
       p.textContent = text
       p.style.color = color

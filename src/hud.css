@@ -79,6 +79,9 @@
   font-size: max(16px, calc(38 * var(--u)));
 }
 .hud-sub {
+  margin: calc(2 * var(--u)) 0 calc(4 * var(--u));
+  line-height: 1.15;
+  white-space: nowrap;
   font-size: max(11px, calc(19 * var(--u)));
   --ink: #1a1a1a;
   -webkit-text-stroke-width: max(2px, calc(4 * var(--u)));
@@ -345,7 +348,8 @@
 }
 .hud-grid {
   display: grid;
-  grid-template-columns: repeat(2, max(52px, calc(100 * var(--u))));
+  /* Wide enough for the longest label ("2x Strength"), so no label spills past the screen edge. */
+  grid-template-columns: repeat(2, max(64px, calc(112 * var(--u))));
   gap: calc(10 * var(--u)) calc(12 * var(--u));
 }
 .hud-btn {
@@ -505,9 +509,11 @@
   font-weight: 500;
   color: #c9ccd2;
 }
+/* Key hints sit just left of the right-hand button column (which runs down to the sound / day-night
+   buttons), so the two never cover each other. The column is 2 x the grid column + its gap wide. */
 .hud-keys {
   position: absolute;
-  right: calc(var(--safe-r) + 16 * var(--u));
+  right: calc(var(--safe-r) + 14 * var(--u) + 2 * max(64px, calc(112 * var(--u))) + 12 * var(--u) + 18 * var(--u));
   bottom: calc(var(--safe-b) + 16 * var(--u));
   display: flex;
   flex-direction: column;
@@ -656,6 +662,8 @@
   .hud-right { top: calc(var(--top-top) + 120px); gap: 8px; }
   .hud-grid { gap: 4px 8px; }
   .hud-small { display: none; }
+  /* The button column folds away here, so the key hints can go back to the corner. */
+  .hud-keys { right: calc(var(--safe-r) + 16 * var(--u)); }
   /* The menu buttons hide behind the MENU toggle until it is tapped. */
   .hud-more { display: flex; }
   .hud-right:not(.menu-open) .hud-grid { display: none; }
