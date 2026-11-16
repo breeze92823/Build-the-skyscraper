@@ -92,6 +92,9 @@ function buildGround(root) {
   rect(10, 2, 56, 14, 0.034)
   rect(-6, 20, 6, 46, 0.034)
   rect(-34, 33, 34, 46, 0.033)
+  // South of the road: walks to the Egg Hall entrance and the Spin stage.
+  rect(LAYOUT.eggs.x - 8, 54, LAYOUT.eggs.x + 8, LAYOUT.eggs.z - 17.5, 0.034)
+  rect(LAYOUT.spin.x - 6, 54, LAYOUT.spin.x + 6, LAYOUT.spin.z - 5, 0.034)
   // Plaza: round paved pad with a concrete rim and an inlaid compass ring.
   const plaza = LAYOUT.plaza
   const conc = new MeshStandardMaterial({ map: toTexture(paintConcrete(), { repeat: 1 / 6, srgb: true }), roughness: 0.9 })
@@ -300,10 +303,10 @@ function buildProps(statics, dynamic) {
   solidBox(1.4, 1, 3.2, -78, 1, -96, 0.3)
   place(statics, makePile('#e2a868', 4), -88, -50)
   place(statics, makePile('#9da3ab', 3), 86, -24)
-  place(statics, makePile('#e2a868', 3), 84, 64)
+  place(statics, makePile('#e2a868', 3), 104, 100)
   solidPole(2.6, 2.6, -88, -50)
   solidPole(2, 2, 86, -24)
-  solidPole(2, 2, 84, 64)
+  solidPole(2, 2, 104, 100)
   // Barriers and cones.
   for (let x = -100; x <= 100; x += 25) place(statics, makeBarrier(3), x, -122, 0)
   for (const [x, z] of [[-14, -44], [22, -44], [-20, 0], [24, 0], [-46, 3], [-46, 25], [8, 22], [-8, 22], [-30, -110], [30, -40], [-48, -60], [48, -80], [110, 30], [-110, 30]]) {

@@ -86,6 +86,10 @@
 .w-card.owned {
   background: linear-gradient(#e9ffe9, #c8f5cf);
 }
+.w-card.focus {
+  box-shadow: 0 0 0 max(3px, calc(6 * var(--uiw-u))) #ffd23a;
+  animation: dy-glow 0.8s ease-in-out infinite alternate;
+}
 .w-card .w-desc {
   flex: 1;
 }

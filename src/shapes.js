@@ -154,7 +154,8 @@ function triangulate(pts) {
 // One storey: a slab band (group 0, footprint grown by `slabOut`) from 0 to `slab` with top
 // and bottom caps, and the glass wall (group 1) from `slab` to `height`, its U running
 // along the perimeter in metres and V 0..1 up the glass.
-export function floorGeometry(pts, height, slab, slabOut = 0.35, glassIn = 0.12) {
+// `skipGlass(i)` leaves glass panel i (the edge from pts[i] to pts[i + 1]) out: a doorway.
+export function floorGeometry(pts, height, slab, slabOut = 0.35, glassIn = 0.12, skipGlass = null) {
   const pos = []
   const nrm = []
   const uv = []
@@ -163,12 +164,16 @@ export function floorGeometry(pts, height, slab, slabOut = 0.35, glassIn = 0.12)
   const slabPts = offset(pts, slabOut)
   const glassPts = offset(pts, -glassIn)
   let start = 0
-  const sides = (poly, y0, y1, uScale) => {
+  const sides = (poly, y0, y1, uScale, skip = null) => {
     let u = 0
     for (let i = 0; i < poly.length; i++) {
       const [ax, az] = poly[i]
       const [bx, bz] = poly[(i + 1) % poly.length]
       const len = Math.hypot(bx - ax, bz - az)
+      if (skip?.(i)) {
+        u += len
+        continue
+      }
       const [ex, ez] = norm(bx - ax, bz - az)
       // Outward normal (CCW from above): the edge direction turned to its right, (-ez, ex).
       const o = pos.length / 3
@@ -197,7 +202,7 @@ export function floorGeometry(pts, height, slab, slabOut = 0.35, glassIn = 0.12)
   cap(slabPts, 0, false)
   groups.push([start, idx.length - start, 0])
   start = idx.length
-  const perim = sides(glassPts, slab, height, 1)
+  const perim = sides(glassPts, slab, height, 1, skipGlass)
   groups.push([start, idx.length - start, 1])
   const g = new BufferGeometry()
   g.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3))

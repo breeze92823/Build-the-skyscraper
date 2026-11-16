@@ -1,5 +1,5 @@
 import { ACESFilmicToneMapping, BoxGeometry, Clock, ConeGeometry, Group, Mesh, PCFSoftShadowMap, PerspectiveCamera, Scene, SRGBColorSpace, Vector3, WebGLRenderer } from 'three'
-import { CAMERA, CREW, ELEVATOR, GIFT, GYM, LAYOUT, RANKS, SAVE, SHOP, SPAWN, SPAWN_FACING, TOWER, graphicsPreset, RENDER } from './config.js'
+import { CAMERA, CREW, ELEVATOR, GIFT, GYM, INSIDE, LAYOUT, RANKS, SAVE, SHOP, SPAWN, SPAWN_FACING, SPIN, TOWER, graphicsPreset, RENDER } from './config.js'
 import * as bloxity from './bloxity.js'
 import { install as installInput, inputState, onKey } from './input.js'
 import { installTouch } from './touch.js'
@@ -18,10 +18,18 @@ import { buildSite } from './site.js'
 import { createPit } from './pit.js'
 import { createTower } from './tower.js'
 import { createElevator } from './elevator.js'
+import { createLobby } from './lobby.js'
 import { createStairs } from './stairs.js'
 import { createCranes } from './cranes.js'
 import { createGym } from './gym.js'
 import { createLeaderboard } from './leaderboard.js'
+import { createRobotHall } from './robotGear.js'
+import { createRobotPlayer } from './robotPlayer.js'
+import { createEggHall } from './eggs.js'
+import { createSpinStage } from './spin.js'
+import { createPetFollowers } from './pets.js'
+import { createPets } from './petUi.js'
+import { createSpinWindow } from './spinUi.js'
 import { createFx } from './fx.js'
 import { createBots } from './bots.js'
 import { dressWorker, makeNameTag } from './characters.js'
@@ -114,22 +122,34 @@ const elevator = createElevator(scene, tower, {
 })
 createStairs(scene, tower)
 const cranes = createCranes(scene, tower)
-const gym = createGym(scene)
-const board = createLeaderboard(scene)
 fx = createFx(scene)
 fx.setScale(preset.particles)
-const bots = createBots(scene, { tower, elevator, pit, gym, fx })
+const gym = createGym(scene, fx)
+gym.refresh(state.buildings, state.gymOwned)
+const board = createLeaderboard(scene)
+const robotHall = createRobotHall(scene)
+const hall = createEggHall(scene)
+const spinStage = createSpinStage(scene)
+const followers = createPetFollowers(scene)
+const equippedPets = () => state.petEq.map((u) => state.pets.find((p) => p.uid === u)).filter(Boolean)
+followers.sync(equippedPets())
+// The finished building's lobby + express elevator to the roof.
+const lobby = createLobby(scene, tower, {
+  onRide(what, dir) {
+    if (what === 'start') game.liftStart(dir === 'up')
+    else game.liftArrive()
+  },
+})
+const bots = createBots(scene, { tower, elevator, pit, gym, fx, lobby })
 const dayNight = createDayNight(lighting)
 const events = createEvents()
 
 for (const key of Object.keys(bloxity.settings)) applySetting(key, bloxity.settings[key])
 
-// Ambient particles: sand blowing across the site, sparkles over the pit, the gym and the build.
+// Ambient particles: sand blowing across the site, sparkles over the pit and the build (each
+// gym pad makes its own in gym.js).
 createEmitter(scene, { boxes: [{ x: 0, y: 1.2, z: -20, sx: 140, sy: 1, sz: 130 }], count: 420, life: 7, velocity: [3.2, 0.15, 0.8], spread: [1, 0.2, 0.6], size: 0.35, color: '#f2c38a', intensity: 0.6, opacity: 0.45, sprite: 'dot', seed: 3 })
 createEmitter(scene, { boxes: [{ x: pit.zone.x, y: 0.6, z: pit.zone.z, sx: pit.zone.w / 2, sy: 0.3, sz: pit.zone.d / 2 }], count: 70, life: 2.4, velocity: [0, 1.4, 0], spread: [0.3, 0.4, 0.3], size: 0.3, color: '#ffe066', intensity: 2.6, sprite: 'sparkle', twinkle: 6, seed: 4 })
-for (const p of gym.pads.filter((pd) => pd.tier.price != null)) {
-  createEmitter(scene, { boxes: [{ x: p.x, y: 1, z: p.z, sx: 4.5, sy: 0.5, sz: 4.5 }], count: 50, life: 2.6, velocity: [0, 1.2, 0], spread: [0.2, 0.4, 0.2], size: 0.35, color: p.tier.color, intensity: 3, sprite: 'sparkle', twinkle: 5, seed: 7 })
-}
 const roofSparks = createEmitter(scene, { boxes: [{ x: 0, y: 0.4, z: 0, sx: 18, sy: 0.3, sz: 18 }], count: 90, life: 2.2, velocity: [0, 1.6, 0], spread: [0.3, 0.5, 0.3], size: 0.35, color: '#7dffa0', intensity: 2.5, sprite: 'sparkle', twinkle: 7, seed: 9 })
 roofSparks.position.set(tower.center.x, 0, tower.center.z)
 
@@ -214,6 +234,17 @@ bloxity.onReservedAreas((areas) => {
 const say = (text, good = true) => hud.toast(text, good)
 const windows = createWindows({ hud, say, onBoost: buyBoost })
 const interact = createInteract()
+lobby.attach(interact)
+// Robot Gear: pedestal prompts, suit-up, G ability (transform / fly / Titan dropship).
+const robots = createRobotPlayer({ scene, hall: robotHall, interact, hud, fx, say, player, playerGroup, getAvatar: () => avatar, popAtPlayer })
+const pets = createPets({ hall, say, openShop: (id) => windows.openShopAt(id) })
+const spinWin = createSpinWindow({
+  say,
+  onSpin(kind, index, offset) {
+    spinStage.repaint(SPIN[kind])
+    spinStage.spinTo(index, SPIN.time, offset)
+  },
+})
 
 function buyBoost(i, node) {
   const b = SHOP.boosts[i]
@@ -228,10 +259,12 @@ function buyBoost(i, node) {
     sfx.deny()
     return false
   }
+  // Mark yourself as a helper first: a big boost can finish floors (and the whole building)
+  // inside addBlocks, and those events check these flags.
+  helpedBuilding = true
+  helpedFloor = true
   const taken = tower.addBlocks(b.blocks)
   if (taken > 0) {
-    helpedBuilding = true
-    helpedFloor = true
     S.placedBlocks(taken, { pay: false })
     trackRate(taken)
   }
@@ -246,6 +279,8 @@ hud.on('boost', (i) => buyBoost(i))
 hud.on('shop', () => windows.shop.open())
 hud.on('upgrades', () => windows.upgrades.open())
 hud.on('ranks', () => windows.ranks.open())
+hud.on('pets', () => pets.windows.pets.open())
+hud.on('spin', () => spinWin.open())
 hud.on('daily', () => windows.daily.open())
 hud.on('pass', (id) => {
   if (state.passes[id]) say('You already own this!', true)
@@ -262,6 +297,19 @@ hud.on('stop', () => stopTraining())
 
 interact.add({ x: site.kiosks.upgrades.pad.x, z: site.kiosks.upgrades.pad.z, y: 1.6, r: 4.5, info: () => ({ title: 'Upgrade Station', verb: 'Open Upgrades' }), run: () => windows.upgrades.open() })
 interact.add({ x: site.kiosks.shop.pad.x, z: site.kiosks.shop.pad.z, y: 1.6, r: 4.5, info: () => ({ title: 'Shop', verb: 'Open Shop' }), run: () => windows.shop.open() })
+// Egg hall: the Pet Merge machine. Spin stage: the wheel.
+interact.add({ x: hall.merge.x, z: hall.merge.z, y: 1.6, r: 3.4, info: () => ({ title: 'Pet Merge', verb: 'Merge 5 pets into a Golden one' }), run: () => pets.windows.merge.open() })
+interact.add({
+  x: spinStage.pad.x,
+  z: spinStage.pad.z,
+  y: 1.6,
+  r: 6,
+  info: () => {
+    const n = state.spins.normal + state.spins.golden
+    return { title: 'Spin Wheel', verb: n ? `Spin! (${n} free)` : 'Open the Spin Wheel' }
+  },
+  run: () => spinWin.open(),
+})
 
 // Gym machines.
 const repGain = (st) => GYM.tiers[st.tier].mult * S.gymMultiplier(st.kind)
@@ -338,7 +386,7 @@ function stopTraining() {
   training = null
   player.locked = false
   player.hold = null
-  resetPlayer({ x: st.exit.x, y: 0.4, z: st.exit.z }, player.facing)
+  resetPlayer({ x: st.exit.x, y: st.exit.y ?? 0.4, z: st.exit.z }, player.facing)
   hud.training(false)
 }
 function doRep() {
@@ -347,12 +395,7 @@ function doRep() {
   S.addStat(st.kind, gain)
   game.rep(st.kind, GYM.tiers[st.tier].mult)
   popAtPlayer(`+${S.short(gain)} ${st.kind === 'strength' ? '💪' : '⚡'}`, st.kind === 'strength' ? '#ffb02e' : '#3fb6ff')
-  if (st.kind === 'strength') {
-    const b = st.bar.getWorldPosition(tmpV)
-    fx.sparks(b.x, b.y, b.z, { count: 10, colors: [GYM.tiers[st.tier].color, '#ffffff'], speed: 4, size: 0.3, life: 0.6 })
-  } else {
-    fx.dust(player.position.x, player.position.y, player.position.z, { count: 2, size: 0.6, life: 0.6, color: '#e6e6e6', alpha: 0.3 })
-  }
+  gym.rep(st, true)
 }
 function tapRep() {
   if (!training) return
@@ -363,8 +406,11 @@ const tmpV = new Vector3()
 // --- Keys -----------------------------------------------------------------------------------------------------
 onKey('KeyE', () => {
   if (training) return stopTraining()
+  if (pets.key('hatch')) return // next to an egg: hatch one
   interact.trigger()
 })
+onKey('KeyF', () => pets.key('multi'))
+onKey('KeyT', () => pets.key('auto'))
 onKey('KeyN', () => {
   dayNight.skip()
   sfx.dayNight()
@@ -373,7 +419,7 @@ onKey('KeyV', toggleMode)
 onKey('KeyR', () => respawnPlayer())
 onKey('Space', () => tapRep())
 onKey('KeyM', () => toggleMuted())
-installTouch({ mode: toggleMode, day: () => dayNight.skip(), respawn: () => respawnPlayer() })
+installTouch({ mode: toggleMode, day: () => dayNight.skip(), respawn: () => respawnPlayer(), ability: () => robots.ability() })
 onModeChanged((mode) => {
   playerGroup.visible = mode !== 'player'
 })
@@ -430,6 +476,9 @@ tower.on('floor', ({ floor, of, done }) => {
 let fireworks = 0
 tower.on('complete', ({ n, name }) => {
   game.buildingDone()
+  setTimeout(() => {
+    if (tower.lobby) hud.banner(`GO INSIDE! ${INSIDE.mult}X STRENGTH & SPEED`, '#7dff6b', 3.2)
+  }, 4200)
   fireworks = TOWER.celebrate - 1
   if (helpedBuilding) {
     state.buildings++
@@ -440,6 +489,10 @@ tower.on('complete', ({ n, name }) => {
     hud.bump('buildings')
     const next = GYM.tiers.find((t) => t.need === state.buildings)
     if (next) setTimeout(() => say(`New gym pad unlocked: ${next.label}!`, true), 2600)
+    // Every building you helped finish is a free spin (and the wheel's cash prizes grow).
+    S.addSpins('normal', SPIN.perBuilding)
+    spinStage.repaint(SPIN.normal)
+    setTimeout(() => say(`+${SPIN.perBuilding} FREE spin! Open the Spin Wheel`, true), next ? 5200 : 2600)
   }
 })
 let wasSinking = false
@@ -453,7 +506,7 @@ tower.on('height', () => {
       fx.dust(C.x + Math.cos(a) * tower.spec.size, 0.5, C.z + Math.sin(a) * tower.spec.size, { count: 8, size: 5, grow: 3, life: 3, spread: 4, push: 3, alpha: 0.6 })
     }
     // Nobody rides it down: anyone up there is brought to the plaza.
-    if (player.position.y > 1.5 || player.hold) {
+    if (player.position.y > 1.5 || player.hold || lobby.within(player.position)) {
       if (training) stopTraining()
       player.locked = false
       player.hold = null
@@ -475,6 +528,9 @@ tower.on('building', () => {
 
 // --- Stat events -------------------------------------------------------------------------------------------------
 S.on('strength', () => dress?.setMuscle(S.muscle(), proportions?.torsoScaleX ?? 1))
+// A gym pad opening (buildings finished, bought, or won): its force field drops with a burst.
+S.on('buildings', () => gym.refresh(state.buildings, state.gymOwned, true))
+S.on('gymOwned', () => gym.refresh(state.buildings, state.gymOwned, true))
 S.on('rankUp', (i) => {
   game.rankUp()
   hud.banner(`RANK UP! ${RANKS[i].name.toUpperCase()}`, RANKS[i].color, 3.2)
@@ -486,6 +542,8 @@ let windowsDirty = false
 S.on('cash', () => (windowsDirty = true))
 S.on('upgrade', () => windows.refresh())
 S.on('pass', () => windows.refresh())
+S.on('pets', () => followers.sync(equippedPets()))
+S.on('spins', () => spinWin.refresh())
 
 events.on((ev) => {
   if (ev) {
@@ -553,6 +611,31 @@ let flyT = 0
 let popAcc = 0
 let popT = 0
 let wasFull = false
+let insideT = 0
+// Best gym pad you may use x 5X x your gym passes, for each stat.
+function insideReward() {
+  let best = 1
+  GYM.tiers.forEach((tier, i) => {
+    if (gym.tierUnlocked(i, state.buildings, state.gymOwned)) best = Math.max(best, tier.mult)
+  })
+  const str = Math.round(INSIDE.base * INSIDE.mult * best * S.gymMultiplier('strength'))
+  const spd = Math.round(INSIDE.base * INSIDE.mult * best * S.gymMultiplier('speed'))
+  S.addStat('strength', str)
+  S.addStat('speed', spd)
+  statPopNearPlayer('strength', str)
+  statPopNearPlayer('speed', spd)
+  game.rep('strength', best)
+}
+// Icon + "+N" somewhere around the player (the inside rewards scatter like the reference).
+function statPopNearPlayer(kind, n) {
+  const p = player.renderPosition
+  screen.set(p.x, p.y + 1.6, p.z).project(camera)
+  if (screen.z > 1) return
+  const spread = Math.min(window.innerWidth, window.innerHeight) * 0.22
+  const x = ((screen.x + 1) / 2) * window.innerWidth + (Math.random() * 2 - 1) * spread
+  const y = ((1 - screen.y) / 2) * window.innerHeight + (Math.random() * 2 - 1) * spread * 0.5
+  hud.statPop(x, y, kind, `+${S.short(n)}`)
+}
 let saveT = 0
 let refreshT = 0
 const back = new Vector3()
@@ -577,7 +660,7 @@ function frame() {
   elapsedTotal = elapsed
   state.playtime += dt
 
-  player.walkSpeed = S.walkSpeed()
+  player.walkSpeed = S.walkSpeed() * robots.speedMul()
   // Moving while on a machine gets you off it.
   if (training && (Math.abs(inputState.move.x) > 0.3 || Math.abs(inputState.move.z) > 0.3)) stopTraining()
 
@@ -611,8 +694,9 @@ function frame() {
     rep,
   })
   back.set(p.x - Math.sin(player.facing) * 0.35, p.y + 1.3, p.z - Math.cos(player.facing) * 0.35)
-  tag.sprite.position.set(p.x, p.y + (benching ? 0.9 : 2.5), p.z)
+  tag.sprite.position.set(p.x, p.y + (benching ? 0.9 : 2.5 * robots.bodyScale()), p.z)
   tag.set(myName(), S.rankIndex())
+  tag.sprite.visible = !lobby.riding // in the cab the camera is right behind your head
 
   // --- Collect in the pit.
   const cap = S.capacity()
@@ -651,9 +735,11 @@ function frame() {
       if (buildAcc >= 1) {
         const n = Math.min(state.bag, Math.floor(buildAcc))
         buildAcc -= n
-        const took = tower.addBlocks(n)
+        // Robot Gear: every block from the bag places gearBlocks() blocks.
+        const mult = S.gearBlocks()
+        const took = tower.addBlocks(Math.round(n * mult))
         if (took > 0) {
-          S.setBag(state.bag - took)
+          S.setBag(state.bag - Math.min(n, Math.max(1, Math.ceil(took / mult))))
           S.placedBlocks(took)
           helpedFloor = true
           helpedBuilding = true
@@ -679,6 +765,16 @@ function frame() {
 
   // --- World systems.
   const ride = elevator.update(dt, elapsed, player)
+  const lobbyRide = lobby.update(dt, elapsed)
+  // Inside the open building: Strength and Speed tick up by themselves (5X).
+  const inside = !training && lobby.contains(player.position)
+  if (inside) {
+    insideT += dt
+    if (insideT >= INSIDE.every) {
+      insideT -= INSIDE.every
+      insideReward()
+    }
+  } else insideT = INSIDE.every * 0.5
   const night = dayNight.update(dt)
   if (Math.abs(night - lastNight) > 0.01) {
     lastNight = night
@@ -694,7 +790,12 @@ function frame() {
   cranes.update(dt, elapsed)
   site.update(dt, elapsed)
   pit.update(dt, elapsed)
+  hall.update(dt, elapsed)
+  spinStage.update(dt, elapsed)
+  followers.update(dt, elapsed, player.renderPosition, player.facing, Math.hypot(player.velocity.x, player.velocity.z) > 1, playerGroup.visible && !training)
   gym.update(dt, elapsed, training?.st)
+  robotHall.update(dt, elapsed)
+  robots.update(dt, elapsed, { building: buildStatus === 'build', collecting: inPit && state.bag < cap, training: !!training })
   bots.update(dt, elapsed)
   crewBot = bots.near(player.position.x, player.position.z, CREW.radius)
   if (crewBot && Math.abs(crewBot.pos.y - player.position.y) > 2) crewBot = null
@@ -731,6 +832,14 @@ function frame() {
       gz = s.z - 2.5
     }
   }
+  if (gx === null && !training && tower.lobby && !inside && player.position.y < 2) {
+    const s = lobby.spots() // the open building's door
+    if (s) {
+      gx = s.out.x
+      gy = 6.5
+      gz = s.out.z
+    }
+  }
   guide.visible = gx !== null && !anyWindowOpen()
   if (guide.visible) {
     guide.position.set(gx, gy + Math.sin(elapsed * 4) * 0.4, gz)
@@ -739,16 +848,20 @@ function frame() {
 
   // --- Prompts, HUD, status.
   interact.update(camera, training ? null : player.position)
+  pets.update(camera, training ? null : player.position, !!training)
   const t = tower.progress()
-  hud.ride(ride)
+  hud.ride(lobbyRide ?? ride)
+  hud.notice(tower.lobby && !inside && !lobby.riding && player.position.y < 2 ? 'The building is complete! Go inside!' : null)
   if (training) {
     hud.status('GYM', training.st.kind === 'strength' ? 'Training Strength' : 'Training Speed', 'Tap LIFT! (or Space) to go faster · E to stop')
     hud.alert(null)
-  } else if (ride.riding) {
+  } else if (ride.riding || lobby.riding) {
     hud.status(null)
     hud.alert(null)
   } else if (tower.phase !== 'building') {
-    hud.status('DONE', 'Building complete!', 'A new building starts soon')
+    if (inside) hud.status(`${INSIDE.mult}X`, 'Training Inside', 'Strength and Speed go up while you stay')
+    else if (tower.lobby) hud.status('GO', 'Building complete!', `Go inside for ${INSIDE.mult}X Strength and Speed`)
+    else hud.status('DONE', 'Building complete!', 'A new building starts soon')
     hud.alert(null)
   } else if (buildStatus === 'build') {
     hud.status('AUTO', 'Auto Building', 'Stay near the build')
@@ -792,7 +905,7 @@ function frame() {
     crewCount: state.crew.length,
     rankIdx: S.rankIndex(),
     totalBlocks: state.totalBlocks,
-    tower: { ...t, name: tower.spec.def.name },
+    tower: { ...t, name: tower.spec.def.name, openLeft: tower.lobby ? tower.openLeft : null },
     event: ev,
     nextEvent: events.nextIn(),
     passes: state.passes,
@@ -800,6 +913,7 @@ function frame() {
     dailyReady: S.dailyStatus().canClaim,
     eta,
     muted: isMuted(),
+    spins: state.spins.normal + state.spins.golden,
   })
   dress?.setFill(state.bag / Math.max(1, cap), cap > 120 ? Math.min(3, Math.log2(cap / 120) + 0.5) : 0)
 
@@ -812,6 +926,8 @@ function frame() {
     if (windowsDirty) {
       windowsDirty = false
       windows.refresh()
+      spinWin.refresh()
+      pets.refresh()
     }
   }
 
@@ -842,13 +958,16 @@ function frame() {
   }
 }
 
+let wiping = false // reset(): the save is gone, do not write it back on the way out
 window.addEventListener('beforeunload', () => {
-  state.tower = tower.toSave()
-  S.save()
+  if (!wiping) {
+    state.tower = tower.toSave()
+    S.save()
+  }
   bloxity.teardown()
 })
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
+  if (document.hidden && !wiping) {
     state.tower = tower.toSave()
     S.save()
   }
@@ -872,11 +991,22 @@ if (import.meta.env.DEV) {
     state,
     tower,
     elevator,
+    lobby,
     bots,
+    gym,
+    // Finished buildings (opens gym pads with their unlock burst).
+    buildings: (n) => {
+      state.buildings = n
+      S.emit('buildings', 0)
+    },
     give: (r) => S.grant(r),
     view: (from, to) => (window.__view = from ? [from, to] : null),
     blocks: (n) => tower.addBlocks(n),
+    spins: (n = 10) => S.addSpins('normal', n),
+    pet: (id, tier = 0) => S.addPet(id, tier, { force: true }),
+    robots,
     reset: () => {
+      wiping = true
       S.resetSave()
       location.reload()
     },

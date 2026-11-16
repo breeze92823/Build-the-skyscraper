@@ -1036,3 +1036,473 @@ export function paintCorrugated(base = '#3b6fd6', size = 128) {
   }
   return c
 }
+
+// --- Gym (gym.js, gymKit.js) ------------------------------------------------------------
+// A gym pad's floor by theme, covering the whole pad (not tiled): { map, glow }. `glow` is
+// an emissive mask at half size (black = unlit, colour = the glowing lines) or null.
+export function paintGymFloor(theme, { base, alt, line }, size = 512, seed = 31) {
+  const rand = mulberry32(seed)
+  const S = size
+  const map = canvas(S)
+  const ctx = map.getContext('2d')
+  let glow = null
+  let g = null
+  if (theme !== 'basic' && theme !== 'hazard') {
+    glow = canvas(S / 2)
+    g = glow.getContext('2d')
+    g.fillStyle = '#000'
+    g.fillRect(0, 0, S / 2, S / 2)
+    g.scale(0.5, 0.5)
+  }
+  // Path drawn on the glow mask as a soft bright line.
+  const glowLine = (draw, width, color = line, blur = 10) => {
+    if (!g) return
+    g.save()
+    g.strokeStyle = color
+    g.lineWidth = width
+    g.shadowColor = color
+    g.shadowBlur = blur
+    g.lineCap = g.lineJoin = 'round'
+    draw(g)
+    g.stroke()
+    g.restore()
+  }
+  const strokeOn = (c, draw, width, color, alpha = 1) => {
+    c.save()
+    c.globalAlpha = alpha
+    c.strokeStyle = color
+    c.lineWidth = width
+    c.lineCap = c.lineJoin = 'round'
+    draw(c)
+    c.stroke()
+    c.restore()
+  }
+  const rect = (inset) => (c) => {
+    c.beginPath()
+    c.rect(inset, inset, S - inset * 2, S - inset * 2)
+  }
+  const circle = (r) => (c) => {
+    c.beginPath()
+    c.arc(S / 2, S / 2, r, 0, Math.PI * 2)
+  }
+  const tiles = (n, joint, vary = 0.06) => {
+    const t = S / n
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        ctx.fillStyle = (i + j) % 2 ? alt : base
+        ctx.fillRect(i * t, j * t, t, t)
+        ctx.fillStyle = rand() < 0.5 ? `rgba(255,255,255,${rand() * vary})` : `rgba(0,0,0,${rand() * vary * 1.5})`
+        ctx.fillRect(i * t, j * t, t, t)
+      }
+    }
+    ctx.fillStyle = joint
+    for (let i = 0; i <= n; i++) {
+      ctx.fillRect(i * t - 2, 0, 4, S)
+      ctx.fillRect(0, i * t - 2, S, 4)
+    }
+  }
+  const speckle = (n, color, amax, r = 1.6) => {
+    for (let i = 0; i < n; i++) {
+      ctx.fillStyle = rgba(color, rand() * amax)
+      ctx.beginPath()
+      ctx.arc(rand() * S, rand() * S, r * (0.5 + rand()), 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+  const noisy = (dark, light, cells, octaves, curve = (v) => v) => {
+    const f = fbm(S, cells, octaves, seed + 7)
+    for (let i = 0; i < f.length; i++) f[i] = curve(f[i])
+    ctx.drawImage(tintCanvas(f, S, dark, light), 0, 0)
+  }
+  // A wandering polyline: `steps` segments of `len` from (x, y), heading drifting by `wobble`.
+  // Points are generated once so the colour map and the glow mask get the same line.
+  const wander = (x, y, heading, steps, len, wobble) => {
+    const pts = [[x, y]]
+    for (let i = 0; i < steps; i++) {
+      heading += (rand() * 2 - 1) * wobble
+      x += Math.cos(heading) * len
+      y += Math.sin(heading) * len
+      pts.push([x, y])
+    }
+    return (c) => {
+      c.beginPath()
+      pts.forEach(([px, py], i) => c[i ? 'lineTo' : 'moveTo'](px, py))
+    }
+  }
+  const star = (c, cx, cy, points, r0, r1, rot = -Math.PI / 2) => {
+    c.beginPath()
+    for (let i = 0; i <= points * 2; i++) {
+      const r = i % 2 ? r1 : r0
+      const a = rot + (i / (points * 2)) * Math.PI * 2
+      c[i ? 'lineTo' : 'moveTo'](cx + Math.cos(a) * r, cy + Math.sin(a) * r)
+    }
+    c.closePath()
+  }
+
+  switch (theme) {
+    case 'basic': {
+      tiles(4, '#1d1f23')
+      speckle(2400, '#ffffff', 0.16, 0.6)
+      strokeOn(ctx, rect(16), 10, line, 0.9)
+      strokeOn(ctx, rect(34), 3, line, 0.5)
+      break
+    }
+    case 'hazard': {
+      tiles(4, '#17181c')
+      speckle(700, '#ffffff', 0.12)
+      // Hazard stripes round the edge.
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(0, 0, S, S)
+      ctx.rect(44, 44, S - 88, S - 88)
+      ctx.clip('evenodd')
+      ctx.fillStyle = line
+      ctx.fillRect(0, 0, S, S)
+      ctx.fillStyle = '#1b1c20'
+      for (let i = -S; i < S * 2; i += 44) {
+        ctx.beginPath()
+        ctx.moveTo(i, 0)
+        ctx.lineTo(i + 22, 0)
+        ctx.lineTo(i + 22 - S, S)
+        ctx.lineTo(i - S, S)
+        ctx.closePath()
+        ctx.fill()
+      }
+      ctx.restore()
+      strokeOn(ctx, rect(56), 4, line, 0.8)
+      break
+    }
+    case 'ice': {
+      noisy(base, alt, 4, 4)
+      speckle(500, '#ffffff', 0.7, 1.2)
+      for (let i = 0; i < 16; i++) {
+        const crack = wander(rand() * S, rand() * S, rand() * Math.PI * 2, 6 + Math.floor(rand() * 6), 14 + rand() * 18, 0.7)
+        strokeOn(ctx, crack, 2, '#ffffff', 0.85)
+        glowLine(crack, 3, line, 8)
+      }
+      strokeOn(ctx, rect(14), 8, line, 0.85)
+      glowLine(rect(14), 8)
+      break
+    }
+    case 'neon': {
+      const rg = ctx.createRadialGradient(S / 2, S / 2, S * 0.05, S / 2, S / 2, S * 0.75)
+      rg.addColorStop(0, alt)
+      rg.addColorStop(1, base)
+      ctx.fillStyle = rg
+      ctx.fillRect(0, 0, S, S)
+      const grid = (step) => (c) => {
+        c.beginPath()
+        for (let p = step; p < S; p += step) {
+          c.moveTo(p, 0)
+          c.lineTo(p, S)
+          c.moveTo(0, p)
+          c.lineTo(S, p)
+        }
+      }
+      strokeOn(ctx, grid(S / 16), 1.5, line, 0.35)
+      strokeOn(ctx, grid(S / 4), 4, line, 0.8)
+      glowLine(grid(S / 16), 1.5, line, 0)
+      glowLine(grid(S / 4), 5, line, 12)
+      strokeOn(ctx, rect(12), 8, line, 0.9)
+      glowLine(rect(12), 9)
+      break
+    }
+    case 'lava': {
+      // Basalt hexes over molten rock: the gaps glow, a few cells smoulder.
+      ctx.fillStyle = '#5a1206'
+      ctx.fillRect(0, 0, S, S)
+      if (g) {
+        g.fillStyle = line
+        g.fillRect(0, 0, S, S)
+      }
+      const r = S / 13
+      const w = r * Math.sqrt(3)
+      for (let row = -1; row * r * 1.5 < S + r; row++) {
+        for (let col = -1; col * w < S + w; col++) {
+          const cx = col * w + (row % 2 ? w / 2 : 0)
+          const cy = row * r * 1.5
+          const hex = (c, rr) => {
+            c.beginPath()
+            for (let k = 0; k < 6; k++) {
+              const a = Math.PI / 6 + (k * Math.PI) / 3
+              c[k ? 'lineTo' : 'moveTo'](cx + Math.cos(a) * rr, cy + Math.sin(a) * rr)
+            }
+            c.closePath()
+          }
+          hex(ctx, r - 4)
+          ctx.fillStyle = rand() < 0.5 ? base : alt
+          ctx.fill()
+          ctx.fillStyle = `rgba(255,255,255,${rand() * 0.05})`
+          ctx.fill()
+          if (g) {
+            hex(g, r - 4)
+            g.fillStyle = rand() < 0.12 ? '#3a0c02' : '#000'
+            g.fill()
+          }
+        }
+      }
+      speckle(400, '#ff8a3a', 0.25, 1.2)
+      strokeOn(ctx, rect(10), 10, line, 0.9)
+      glowLine(rect(10), 10)
+      break
+    }
+    case 'toxic': {
+      tiles(3, '#121714', 0.05)
+      const t = S / 3
+      ctx.fillStyle = 'rgba(255,255,255,0.22)'
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          for (const [dx, dy] of [[14, 14], [t - 14, 14], [14, t - 14], [t - 14, t - 14]]) {
+            ctx.beginPath()
+            ctx.arc(i * t + dx, j * t + dy, 4, 0, Math.PI * 2)
+            ctx.fill()
+          }
+        }
+      }
+      // Glowing puddles.
+      for (let i = 0; i < 7; i++) {
+        const cx = 60 + rand() * (S - 120)
+        const cy = 60 + rand() * (S - 120)
+        const blobs = Array.from({ length: 4 }, () => [cx + (rand() - 0.5) * 30, cy + (rand() - 0.5) * 30, 10 + rand() * 22, 8 + rand() * 16, rand() * 3])
+        const puddle = (c) => {
+          c.beginPath()
+          for (const [x, y, a, b, rot] of blobs) {
+            c.moveTo(x + a, y)
+            c.ellipse(x, y, a, b, rot, 0, Math.PI * 2)
+          }
+        }
+        puddle(ctx)
+        ctx.fillStyle = '#1fae52'
+        ctx.fill()
+        if (g) {
+          g.save()
+          g.shadowColor = line
+          g.shadowBlur = 12
+          g.fillStyle = line
+          puddle(g)
+          g.fill()
+          g.restore()
+        }
+      }
+      const dash = (c) => {
+        c.setLineDash([26, 16])
+        rect(16)(c)
+      }
+      strokeOn(ctx, dash, 7, line, 0.9)
+      glowLine(dash, 7)
+      break
+    }
+    case 'solar': {
+      const rg = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S * 0.72)
+      rg.addColorStop(0, alt)
+      rg.addColorStop(1, base)
+      ctx.fillStyle = rg
+      ctx.fillRect(0, 0, S, S)
+      for (let i = 0; i < 24; i++) {
+        const a0 = (i / 24) * Math.PI * 2
+        const a1 = ((i + 0.5) / 24) * Math.PI * 2
+        ctx.fillStyle = 'rgba(255,190,90,0.10)'
+        ctx.beginPath()
+        ctx.moveTo(S / 2, S / 2)
+        ctx.arc(S / 2, S / 2, S, a0, a1)
+        ctx.closePath()
+        ctx.fill()
+      }
+      const rays = (c) => {
+        c.beginPath()
+        for (let i = 0; i < 12; i++) {
+          const a = (i / 12) * Math.PI * 2
+          c.moveTo(S / 2 + Math.cos(a) * S * 0.16, S / 2 + Math.sin(a) * S * 0.16)
+          c.lineTo(S / 2 + Math.cos(a) * S * 0.46, S / 2 + Math.sin(a) * S * 0.46)
+        }
+      }
+      strokeOn(ctx, rays, 3, line, 0.6)
+      glowLine(rays, 3, line, 8)
+      for (const r of [S * 0.12, S * 0.15]) {
+        strokeOn(ctx, circle(r), 4, line, 0.8)
+        glowLine(circle(r), 4)
+      }
+      strokeOn(ctx, rect(12), 8, line, 0.9)
+      glowLine(rect(12), 8)
+      break
+    }
+    case 'storm': {
+      ctx.fillStyle = base
+      ctx.fillRect(0, 0, S, S)
+      // Diamond tread plate.
+      ctx.fillStyle = alt
+      const st = S / 24
+      for (let y = 0; y < S + st; y += st) {
+        for (let x = 0; x < S + st; x += st) {
+          ctx.save()
+          ctx.translate(x + ((y / st) % 2 ? st / 2 : 0), y)
+          ctx.rotate(((Math.round((x + y) / st) % 2) ? 1 : -1) * 0.7)
+          ctx.fillRect(-st * 0.3, -2, st * 0.6, 4)
+          ctx.restore()
+        }
+      }
+      // Lightning cracks out from the middle.
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + rand() * 0.6
+        const bolt = wander(S / 2 + Math.cos(a) * 30, S / 2 + Math.sin(a) * 30, a, 9, 22, 0.9)
+        strokeOn(ctx, bolt, 3, '#cfe0ff', 0.9)
+        glowLine(bolt, 4, line, 12)
+      }
+      strokeOn(ctx, rect(12), 8, line, 0.9)
+      glowLine(rect(12), 8)
+      break
+    }
+    case 'elite': {
+      ctx.fillStyle = base
+      ctx.fillRect(0, 0, S, S)
+      ctx.fillStyle = alt
+      ctx.fillRect(40, 40, S - 80, S - 80)
+      speckle(600, '#ffffff', 0.12)
+      const starPath = (c) => star(c, S / 2, S / 2, 5, S * 0.2, S * 0.085)
+      starPath(ctx)
+      ctx.fillStyle = base
+      ctx.fill()
+      strokeOn(ctx, starPath, 5, line, 0.95)
+      glowLine(starPath, 5)
+      strokeOn(ctx, circle(S * 0.27), 4, line, 0.8)
+      glowLine(circle(S * 0.27), 4)
+      strokeOn(ctx, rect(40), 6, line, 0.9)
+      glowLine(rect(40), 6)
+      strokeOn(ctx, rect(10), 6, line, 0.6)
+      break
+    }
+    case 'legend': {
+      // White marble with grey and gold veins, a gold border and a star emblem.
+      noisy(alt, base, 3, 5, (v) => Math.min(1, v * 1.25))
+      for (let i = 0; i < 18; i++) {
+        const vein = wander(rand() * S, rand() * S, rand() * Math.PI * 2, 10, 18, 0.5)
+        strokeOn(ctx, vein, 1.5 + rand() * 1.5, rand() < 0.3 ? '#c9a24a' : '#9c9488', 0.45)
+      }
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(0, 0, S, S)
+      ctx.rect(30, 30, S - 60, S - 60)
+      ctx.clip('evenodd')
+      const gg = ctx.createLinearGradient(0, 0, S, S)
+      gg.addColorStop(0, '#ffe27a')
+      gg.addColorStop(0.5, '#c8901a')
+      gg.addColorStop(1, '#ffe27a')
+      ctx.fillStyle = gg
+      ctx.fillRect(0, 0, S, S)
+      ctx.restore()
+      strokeOn(ctx, rect(44), 4, '#d9a21f', 0.9)
+      glowLine(rect(44), 4)
+      const emblem = (c) => star(c, S / 2, S / 2, 8, S * 0.17, S * 0.09, 0)
+      emblem(ctx)
+      ctx.fillStyle = 'rgba(255,200,60,0.35)'
+      ctx.fill()
+      strokeOn(ctx, emblem, 5, '#d9a21f', 1)
+      glowLine(emblem, 5)
+      strokeOn(ctx, circle(S * 0.22), 4, '#d9a21f', 0.9)
+      glowLine(circle(S * 0.22), 4)
+      break
+    }
+  }
+  return { map, glow }
+}
+
+// Treadmill belt: ribbed dark rubber with dashed accent lines near both edges (they make the
+// belt's motion readable). Tiles vertically; scroll offset.y to run it.
+export function paintBelt(accent = '#ffd23a', w = 64, h = 128) {
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  const ctx = c.getContext('2d')
+  ctx.fillStyle = '#1e2024'
+  ctx.fillRect(0, 0, w, h)
+  ctx.fillStyle = '#2c2f35'
+  for (let y = 0; y < h; y += 8) ctx.fillRect(0, y, w, 3)
+  ctx.fillStyle = 'rgba(255,255,255,0.05)'
+  for (let y = 0; y < h; y += 8) ctx.fillRect(0, y, w, 1)
+  ctx.fillStyle = accent
+  for (let y = 0; y < h; y += 32) {
+    ctx.fillRect(4, y, 3, 14)
+    ctx.fillRect(w - 7, y, 3, 14)
+  }
+  return c
+}
+
+// Soft glowing ring (white, tinted by the material): the floor aura under a machine in use.
+export function paintGlowRing(size = 128) {
+  const c = document.createElement('canvas')
+  c.width = c.height = size
+  const ctx = c.getContext('2d')
+  const m = size / 2
+  const g = ctx.createRadialGradient(m, m, 0, m, m, m)
+  g.addColorStop(0, 'rgba(255,255,255,0.18)')
+  g.addColorStop(0.55, 'rgba(255,255,255,0.3)')
+  g.addColorStop(0.78, 'rgba(255,255,255,1)')
+  g.addColorStop(0.86, 'rgba(255,255,255,0.35)')
+  g.addColorStop(1, 'rgba(255,255,255,0)')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, size, size)
+  return c
+}
+
+// --- Lobby (lobby.js) ----------------------------------------------------------------
+// Carpet: a soft mottled base with a fine diamond lattice in a lighter shade (one tile).
+export function paintCarpet(base = '#123a36', size = 256, seed = 1201) {
+  const c = canvas(size)
+  const ctx = c.getContext('2d')
+  ctx.fillStyle = base
+  ctx.fillRect(0, 0, size, size)
+  const rand = mulberry32(seed)
+  for (let i = 0; i < 1400; i++) {
+    ctx.fillStyle = rand() < 0.5 ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.06)'
+    ctx.fillRect(rand() * size, rand() * size, 2 + rand() * 3, 2 + rand() * 3)
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,0.07)'
+  ctx.lineWidth = 2
+  const n = 4
+  for (let i = -n; i <= n * 2; i++) {
+    ctx.beginPath()
+    ctx.moveTo((i * size) / n, 0)
+    ctx.lineTo((i * size) / n + size, size)
+    ctx.moveTo((i * size) / n, 0)
+    ctx.lineTo((i * size) / n - size, size)
+    ctx.stroke()
+  }
+  return c
+}
+
+// Window mullions seen from inside: a post on the left edge, a sill and a transom, the rest
+// transparent (alpha-tested). One tile is one window bay.
+export function paintMullions(frame = '#e8e2d6', w = 128, h = 512) {
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  const ctx = c.getContext('2d')
+  ctx.clearRect(0, 0, w, h)
+  ctx.fillStyle = frame
+  ctx.fillRect(0, 0, 10, h) // post
+  ctx.fillRect(0, h - 26, w, 26) // sill
+  ctx.fillRect(0, h * 0.34, w, 9) // transom
+  ctx.fillRect(0, 0, w, 10) // head
+  ctx.fillStyle = 'rgba(0,0,0,0.25)'
+  ctx.fillRect(10, 0, 3, h)
+  return c
+}
+
+// Coffered ceiling: warm glowing panels between pale beams (MeshBasic, so it reads lit).
+export function paintCoffers(beam = '#efe6d2', light = '#fff1c4', size = 128) {
+  const c = canvas(size)
+  const ctx = c.getContext('2d')
+  ctx.fillStyle = beam
+  ctx.fillRect(0, 0, size, size)
+  const m = size * 0.12
+  const g = ctx.createRadialGradient(size / 2, size / 2, size * 0.05, size / 2, size / 2, size * 0.5)
+  g.addColorStop(0, '#ffffff')
+  g.addColorStop(0.6, light)
+  g.addColorStop(1, '#d9c79c')
+  ctx.fillStyle = g
+  ctx.fillRect(m, m, size - m * 2, size - m * 2)
+  ctx.strokeStyle = 'rgba(0,0,0,0.12)'
+  ctx.lineWidth = 3
+  ctx.strokeRect(m, m, size - m * 2, size - m * 2)
+  return c
+}

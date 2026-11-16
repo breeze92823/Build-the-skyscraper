@@ -412,6 +412,19 @@
   font-size: max(11px, calc(18 * var(--u)));
 }
 .hb-badge[hidden] { display: none; }
+/* Number badge (free spins). */
+.hb-badge.count {
+  width: auto;
+  min-width: max(18px, calc(30 * var(--u)));
+  padding: 0 4px;
+  border-radius: 99px;
+  font-size: max(11px, calc(18 * var(--u)));
+  line-height: max(14px, calc(24 * var(--u)));
+  text-align: center;
+}
+.hb-badge.count::after { content: none; }
+.hud-btn.spin .hb-label { color: #ff7ad9; }
+.hud-btn.pets .hb-label { color: #ffd23a; }
 .hud-small {
   display: flex;
   gap: calc(10 * var(--u));
@@ -639,7 +652,7 @@
   .hud-left { top: max(calc(var(--left-top) - 60px), 96px); }
   /* One row under the rank card, clear of the touch buttons in the bottom-right corner. */
   .hud-right { top: 60px; gap: 6px; }
-  .hud-grid { grid-template-columns: repeat(4, 50px); }
+  .hud-grid { grid-template-columns: repeat(6, 46px); gap: 4px 6px; }
   .hud-btn.pass { display: none; }
   .hud-btn { min-height: 50px; }
   .hb-icon { width: 34px; height: 34px; }
@@ -647,4 +660,51 @@
   .hr-bar { width: 96px; }
   .hud-status { bottom: 8px; padding: 6px 12px; }
   .hud-banner { top: calc(100% + 6px); }
+}
+
+/* Finished building open: "5X INSIDE 2:03" (green on gold, the fill is the time left). */
+.hud-progress.inside .hp-text { color: #7dff4a; }
+.hud-progress.inside .hp-fill { transition: none; }
+
+/* Centre strip: "The building is complete! Go inside!" */
+.hud-notice {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 24%;
+  display: flex;
+  justify-content: center;
+  padding: max(6px, calc(12 * var(--u))) 4vw;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.45) 18%, rgba(0, 0, 0, 0.45) 82%, rgba(0, 0, 0, 0));
+  pointer-events: none;
+  text-align: center;
+}
+.hud-notice[hidden] { display: none; }
+.hud-notice .hud-txt {
+  font-size: max(15px, calc(34 * var(--u)));
+  -webkit-text-stroke-width: 0;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.6);
+}
+
+/* Stat reward pops (inside a finished building): big icon + "+10", drifting up. */
+.hud-stat-pop {
+  display: flex;
+  align-items: center;
+  gap: calc(4 * var(--u));
+  animation: hud-stat-float 1.4s ease-out forwards;
+}
+.hsp-icon { display: block; width: max(40px, calc(84 * var(--u))); height: max(40px, calc(84 * var(--u))); }
+.hsp-icon svg { width: 100%; height: 100%; display: block; }
+.hud-stat-pop .hud-txt {
+  color: #fff1a8;
+  font-size: max(26px, calc(56 * var(--u)));
+}
+@keyframes hud-stat-float {
+  0% { opacity: 0; transform: translate(-50%, -30%) scale(0.4); }
+  14% { opacity: 1; transform: translate(-50%, -55%) scale(1.12); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -200%) scale(0.95); }
+}
+@media (max-height: 520px) {
+  .hud-notice { top: 42%; }
 }

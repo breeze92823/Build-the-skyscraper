@@ -317,6 +317,13 @@ export const LAYOUT = {
   upgrades: { x: 26, z: 40 },
   shop: { x: -26, z: 40 },
   leaderboard: { x: 0, z: 76 },
+  // Egg hall (eggs.js): a covered hall south of the road, entrance on its north side.
+  eggs: { x: 56, z: 80 },
+  // Spin wheel (spin.js): on a round stage east of the egg hall, facing north.
+  spin: { x: 84, z: 70 },
+  // Robot Gear hall (robotGear.js): a T-shaped neon platform south-west of the leaderboard, entrance
+  // from the main road at its north end; the bar of the T is at the far (south) end.
+  robot: { x: -52, z0: 57, hallW: 28, hallEnd: 90, barW: 52, barEnd: 107 },
   roads: [
     // [x1, z1, x2, z2, width]
     [-126, 50, 126, 50, 10], // east-west road south of the plaza
@@ -340,17 +347,36 @@ export const TOWER = {
   celebrate: 9, // s the finished tower stands before it is cleared away
   sinkTime: 3.2, // s it takes to sink into the sand
 }
+// Once a building is finished it stays open for `time` s: its two lowest floors become a
+// lobby (lobby.js) everyone can walk into through the door on the south face. Inside, Strength
+// and Speed tick up by itself: every `every` s, base x mult x the best gym pad you can use x
+// your gym passes. An express elevator in the lobby core rides to a hut on the roof (and back).
+// Each building's lobby look is its BUILDINGS[].lobby.
+export const INSIDE = {
+  time: 180, // s the finished building stays open
+  mult: 5, // the "5X INSIDE" bonus
+  base: 2, // stat per tick at mult 1 on the free gym pad (5X -> +10)
+  every: 0.5, // s between ticks
+  floors: 2, // lobby height in floors
+  doorX: 0, // door centre on the south face (between the hoist and the stairs)
+  doorW: 4.4, // door opening (the glass panels it overlaps are cut away)
+  core: { w: 8, d: 5.6 }, // elevator core in the middle of the lobby
+  cab: { w: 3.2, d: 3, h: 3.3 }, // elevator cab (lobby core and roof hut)
+  doors: 0.5, // s the cab doors take
+  ride: 3.2, // s the express ride takes, whatever the height
+  hutClear: 7.6, // m from the roof edge kept clear of the crown (the hut + a walkway)
+}
 // Building n (0-based) uses BUILDINGS[n % length] for its look and gets taller and
 // heavier each time: floors = floorsBase + n * floorsPer (max floorsMax); blocks per floor =
 // blocksBase * blockGrowth^n * (1 + floor * floorGrowth).
 export const BUILDING_SCALE = { floorsBase: 18, floorsPer: 6, floorsMax: 70, blocksBase: 220, blockGrowth: 2.15, floorGrowth: 0.05 }
 export const BUILDINGS = [
-  { name: 'Crystal Spire', shape: 'chamfer', size: 21, glass: '#3fd3e6', frame: '#e9f7ff', slab: '#ffffff', base: '#6b3fd1', crown: 'spire' },
-  { name: 'Wave Towers', shape: 'blob', size: 24, glass: '#3f7ff0', frame: '#dfe9ff', slab: '#f4f7ff', base: '#2b3f8f', crown: 'dome' },
-  { name: 'Golden Hex', shape: 'hex', size: 22, glass: '#f0b43a', frame: '#fff4d6', slab: '#fff8ea', base: '#7a3d12', crown: 'spire' },
-  { name: 'Emerald Round', shape: 'round', size: 20, glass: '#35d68a', frame: '#e6fff1', slab: '#ffffff', base: '#155e46', crown: 'ring' },
-  { name: 'Ruby Cross', shape: 'cross', size: 23, glass: '#f0566f', frame: '#ffe6ea', slab: '#fff5f6', base: '#6d1424', crown: 'spire' },
-  { name: 'Violet Star', shape: 'star', size: 24, glass: '#a45cff', frame: '#f1e6ff', slab: '#ffffff', base: '#341266', crown: 'dome' },
+  { name: 'Crystal Spire', shape: 'chamfer', size: 21, glass: '#3fd3e6', frame: '#e9f7ff', slab: '#ffffff', base: '#6b3fd1', crown: 'spire', lobby: { name: 'CRYSTAL LOUNGE', carpet: '#123a36', wall: '#16302c', accent: '#3fd3e6', wood: '#8a5a32', sofa: '#f4f1ea', lights: 'chandelier' } },
+  { name: 'Wave Towers', shape: 'blob', size: 24, glass: '#3f7ff0', frame: '#dfe9ff', slab: '#f4f7ff', base: '#2b3f8f', crown: 'dome', lobby: { name: 'WAVE LOUNGE', carpet: '#132447', wall: '#1a2a52', accent: '#5f9bff', wood: '#6b4a2e', sofa: '#eef2fb', lights: 'ring' } },
+  { name: 'Golden Hex', shape: 'hex', size: 22, glass: '#f0b43a', frame: '#fff4d6', slab: '#fff8ea', base: '#7a3d12', crown: 'spire', lobby: { name: 'GOLDEN HALL', carpet: '#4a1d14', wall: '#3a1a10', accent: '#f0b43a', wood: '#9a6a30', sofa: '#fff4dc', lights: 'chandelier' } },
+  { name: 'Emerald Round', shape: 'round', size: 20, glass: '#35d68a', frame: '#e6fff1', slab: '#ffffff', base: '#155e46', crown: 'ring', lobby: { name: 'EMERALD GARDEN', carpet: '#0f3a2a', wall: '#0f2e22', accent: '#35d68a', wood: '#7a5a34', sofa: '#f2fff6', lights: 'pendant' } },
+  { name: 'Ruby Cross', shape: 'cross', size: 23, glass: '#f0566f', frame: '#ffe6ea', slab: '#fff5f6', base: '#6d1424', crown: 'spire', lobby: { name: 'RUBY LOUNGE', carpet: '#3d0f18', wall: '#2e0b12', accent: '#f0566f', wood: '#5a2e22', sofa: '#fff0f2', lights: 'chandelier' } },
+  { name: 'Violet Star', shape: 'star', size: 24, glass: '#a45cff', frame: '#f1e6ff', slab: '#ffffff', base: '#341266', crown: 'dome', lobby: { name: 'STAR CLUB', carpet: '#221040', wall: '#1c0d35', accent: '#b77bff', wood: '#4a2e5a', sofa: '#f6efff', lights: 'ring' } },
 ]
 
 // --- Elevator + stairs (elevator.js, stairs.js) ------------------------------------------
@@ -389,24 +415,47 @@ export const UPGRADES = [
   { id: 'lift', name: 'Elevator Speed', desc: 'Ride your elevator faster', max: 20, value: (l) => 9 * (1 + l * 0.3), unit: 'm/s', price: (l) => Math.round(90 * Math.pow(1.55, l)) },
 ]
 
-// --- Gym (gym.js) ----------------------------------------------------------------------------
+// --- Gym (gym.js, gymKit.js) -------------------------------------------------------------------
 // Each pad has a bench press (Strength) and a treadmill (Speed). `need` = buildings finished
-// to use it; premium pads unlock for good with cash (`price`), never gems.
+// to use it; premium pads unlock for good with cash (`price`), never gems. `theme` picks the
+// pad's floor, decor and ambient particles (GYM.themes); `frame` / `trim` / `cushion` colour
+// its machines.
 export const GYM = {
   repEvery: 0.55, // s between automatic reps
   tapBoost: 0.2, // s a tap / click knocks off the next rep
+  beltSpeed: 4.2, // m/s the treadmill belt runs while someone is on it
+  heatUp: 2.5, // 1/s a machine's glow ramps up while in use
+  heatDown: 1.2, // 1/s it fades once they get off
+  premiumRise: 0.8, // m the premium pads stand above the ground (two steps up from the walkway)
+  unlockTime: 1.4, // s the force field takes to drop when a pad unlocks
   tiers: [
-    { mult: 1, label: 'FREE', color: '#dfe6ee', need: 0 },
-    { mult: 2, label: '2x', color: '#ffd23a', need: 1 },
-    { mult: 5, label: '5x', color: '#35c8ff', need: 3 },
-    { mult: 10, label: '10x', color: '#b04dff', need: 8 },
-    { mult: 25, label: '25x', color: '#ff4a3a', need: 15 },
-    { mult: 50, label: '50x', color: '#2bd96b', need: 25 },
-    { mult: 75, label: '75x', color: '#ff7a1a', need: 50 },
-    { mult: 100, label: '100x', color: '#3b6dff', need: 100 },
-    { mult: 250, label: '250x ELITE', color: '#ff3dc8', price: 2500000 },
-    { mult: 500, label: '500x LEGEND', color: '#ffc21a', price: 12000000 },
+    { mult: 1, label: 'FREE', color: '#dfe6ee', need: 0, theme: 'basic', frame: '#eef1f5', trim: '#8f99a6', cushion: '#2b2e35' },
+    { mult: 2, label: '2x', color: '#ffd23a', need: 1, theme: 'hazard', frame: '#ffc21a', trim: '#24252b', cushion: '#1d1e23' },
+    { mult: 5, label: '5x', color: '#35c8ff', need: 3, theme: 'ice', frame: '#dff7ff', trim: '#35c8ff', cushion: '#0f3d57' },
+    { mult: 10, label: '10x', color: '#b04dff', need: 8, theme: 'neon', frame: '#2a1a40', trim: '#c06bff', cushion: '#3b1763' },
+    { mult: 25, label: '25x', color: '#ff4a3a', need: 15, theme: 'lava', frame: '#231a1c', trim: '#ff4a3a', cushion: '#5c0f0c' },
+    { mult: 50, label: '50x', color: '#2bd96b', need: 25, theme: 'toxic', frame: '#26332b', trim: '#2bd96b', cushion: '#123d22' },
+    { mult: 75, label: '75x', color: '#ff7a1a', need: 50, theme: 'solar', frame: '#4a2a12', trim: '#ff8a2a', cushion: '#5e2a08' },
+    { mult: 100, label: '100x', color: '#3b6dff', need: 100, theme: 'storm', frame: '#151d40', trim: '#4f86ff', cushion: '#10204f' },
+    { mult: 250, label: '250x ELITE', color: '#ff3dc8', price: 2500000, theme: 'elite', frame: '#1c1022', trim: '#ff3dc8', cushion: '#4d0f3d' },
+    { mult: 500, label: '500x LEGEND', color: '#ffc21a', price: 12000000, theme: 'legend', frame: '#ffcf3a', trim: '#fff2b8', cushion: '#2d1d0a' },
   ],
+  // Pad looks. floor: base / alt / line colours for the painted floor (textures.js
+  // paintGymFloor), glow = emissive strength of its glowing lines. fx: the pad's ambient
+  // particles (particles.js createEmitter options; the spawn box is the pad, `y` / `sy` its
+  // height band).
+  themes: {
+    basic: { floor: { base: '#3d4148', alt: '#33363c', line: '#e8edf3', glow: 0 }, fx: { count: 18, life: 5, y: 1.6, sy: 1, velocity: [0, 0.25, 0], spread: [0.2, 0.1, 0.2], size: 0.09, color: '#ffffff', intensity: 1.6, opacity: 0.45, sprite: 'sparkle', twinkle: 3 } },
+    hazard: { floor: { base: '#2c2d33', alt: '#24252a', line: '#ffc21a', glow: 0 }, fx: { count: 26, life: 3, y: 0.6, sy: 0.4, velocity: [0, 0.6, 0], spread: [0.3, 0.3, 0.3], size: 0.18, color: '#ffd23a', intensity: 2.2, sprite: 'sparkle', twinkle: 6 } },
+    ice: { floor: { base: '#3f9fd2', alt: '#9edcf7', line: '#1fb4ff', glow: 0.9 }, fx: { count: 60, life: 6, y: 4.2, sy: 0.4, velocity: [0.15, -0.7, 0.05], spread: [0.25, 0.15, 0.25], size: 0.2, color: '#eaffff', intensity: 2, sprite: 'sparkle', twinkle: 5 } },
+    neon: { floor: { base: '#1c0f2e', alt: '#2a1745', line: '#d36bff', glow: 1.6 }, fx: { count: 40, life: 3.5, y: 0.5, sy: 0.3, velocity: [0, 0.9, 0], spread: [0.25, 0.3, 0.25], size: 0.22, color: '#e07bff', intensity: 3, sprite: 'sparkle', twinkle: 7 } },
+    lava: { floor: { base: '#1a1416', alt: '#2a2022', line: '#ff5a1a', glow: 2.2 }, fx: { count: 70, life: 2.6, y: 0.4, sy: 0.2, velocity: [0, 1.5, 0], spread: [0.35, 0.5, 0.35], size: 0.18, color: '#ff7a2a', intensity: 3.4, sprite: 'dot', twinkle: 9 } },
+    toxic: { floor: { base: '#28322c', alt: '#1f2823', line: '#37ff7a', glow: 1.8 }, fx: { count: 45, life: 3.2, y: 0.35, sy: 0.15, velocity: [0, 0.75, 0], spread: [0.15, 0.25, 0.15], size: 0.26, color: '#4dff8a', intensity: 2.4, sprite: 'dot', twinkle: 0 } },
+    solar: { floor: { base: '#3a2414', alt: '#4c3018', line: '#ffa040', glow: 1.7 }, fx: { count: 50, life: 3, y: 0.6, sy: 0.4, velocity: [0, 1.1, 0], spread: [0.4, 0.3, 0.4], size: 0.22, color: '#ffb347', intensity: 3.2, sprite: 'sparkle', twinkle: 6 } },
+    storm: { floor: { base: '#141b33', alt: '#1c2645', line: '#5f9bff', glow: 2 }, fx: { count: 45, life: 1.6, y: 1.2, sy: 1, velocity: [0, 0.3, 0], spread: [1.2, 1.2, 1.2], size: 0.16, color: '#9fc4ff', intensity: 3.6, sprite: 'sparkle', twinkle: 14 } },
+    elite: { floor: { base: '#3a0d33', alt: '#5a1550', line: '#ff6ad8', glow: 1.8 }, fx: { count: 60, life: 4.5, y: 5, sy: 0.3, velocity: [0, -0.9, 0], spread: [0.35, 0.2, 0.35], size: 0.22, color: '#ff8ae0', intensity: 2.8, sprite: 'sparkle', twinkle: 8 } },
+    legend: { floor: { base: '#f4efe6', alt: '#ddd3c2', line: '#ffc21a', glow: 1.6 }, fx: { count: 80, life: 3.4, y: 0.6, sy: 0.4, velocity: [0, 1.3, 0], spread: [0.3, 0.4, 0.3], size: 0.26, color: '#ffd84a', intensity: 3.4, sprite: 'sparkle', twinkle: 6 } },
+  },
 }
 
 // --- Ranks -------------------------------------------------------------------------------------
@@ -461,6 +510,159 @@ export const SHOP = {
     { blocks: 10000, price: 13000, color: 'red' },
     { blocks: 50000, price: 60000, color: 'purple' },
   ],
+}
+
+// --- Pets + eggs (eggs.js, pets.js, petUi.js) -----------------------------------------------------------
+// Rarity tiers: tile colour in the egg panel / pets window and the reveal sound level.
+export const RARITIES = {
+  common: { name: 'Common', color: '#b9c0c9', dark: '#6b7480', level: 0 },
+  uncommon: { name: 'Uncommon', color: '#4fd65a', dark: '#1f8a2c', level: 1 },
+  rare: { name: 'Rare', color: '#3ba7ff', dark: '#1b5fb8', level: 2 },
+  epic: { name: 'Epic', color: '#a65cff', dark: '#5a22b0', level: 3 },
+  legendary: { name: 'Legendary', color: '#ffbb1a', dark: '#b86a00', level: 4 },
+  limited: { name: 'Limited', color: '#ff3d6e', dark: '#9a0f35', level: 5 },
+}
+// Every pet. `bonus` is added to the cash and gym multipliers while equipped (0.2 = +20%).
+// `kind` picks the body (pets.js): cat, dog, bunny, bear, fox, mouse, bird, dragon, robot.
+// `c` = [body, belly/face, accent]; `hat` = wears a hard hat.
+export const PETS = [
+  // Hazard Egg
+  { id: 'cone_cat', name: 'Cone Cat', egg: 'hazard', rarity: 'common', bonus: 0.05, kind: 'cat', c: ['#ff8a2a', '#fff3e0', '#ffffff'] },
+  { id: 'hardhat_pup', name: 'Hard Hat Pup', egg: 'hazard', rarity: 'uncommon', bonus: 0.1, kind: 'dog', c: ['#e2b07a', '#fff1dc', '#8a5a33'], hat: true },
+  { id: 'bolt_bunny', name: 'Bolt Bunny', egg: 'hazard', rarity: 'rare', bonus: 0.2, kind: 'bunny', c: ['#c9ced6', '#ffffff', '#3fb6ff'] },
+  { id: 'caution_fox', name: 'Caution Fox', egg: 'hazard', rarity: 'epic', bonus: 0.45, kind: 'fox', c: ['#ffcc1a', '#fff8d6', '#1d1d22'], hat: true },
+  { id: 'hazard_dragon', name: 'Hazard Dragon', egg: 'hazard', rarity: 'legendary', bonus: 1, kind: 'dragon', c: ['#ffcc1a', '#1d1d22', '#ff5a1a'] },
+  // Brick Egg
+  { id: 'brick_bear', name: 'Brick Bear', egg: 'brick', rarity: 'common', bonus: 0.15, kind: 'bear', c: ['#c8553a', '#f0c8a8', '#7a2a1a'] },
+  { id: 'mortar_mouse', name: 'Mortar Mouse', egg: 'brick', rarity: 'uncommon', bonus: 0.3, kind: 'mouse', c: ['#a7acb4', '#e8e4dc', '#ff8fa8'], hat: true },
+  { id: 'clay_cat', name: 'Clay Cat', egg: 'brick', rarity: 'rare', bonus: 0.6, kind: 'cat', c: ['#d9784a', '#ffe0c8', '#8a3a1a'] },
+  { id: 'kiln_fox', name: 'Kiln Fox', egg: 'brick', rarity: 'epic', bonus: 1.25, kind: 'fox', c: ['#ff5a2a', '#ffe8c8', '#ffd23a'] },
+  { id: 'brick_titan', name: 'Brick Titan', egg: 'brick', rarity: 'legendary', bonus: 2.5, kind: 'robot', c: ['#b8442a', '#f0c8a8', '#7dff6b'] },
+  // Steel Egg
+  { id: 'rivet_rat', name: 'Rivet Rat', egg: 'steel', rarity: 'common', bonus: 0.5, kind: 'mouse', c: ['#8a9099', '#d6dbe2', '#3bd9ff'] },
+  { id: 'steel_pup', name: 'Steel Pup', egg: 'steel', rarity: 'uncommon', bonus: 1, kind: 'dog', c: ['#9aa3ad', '#e6ebf0', '#3a3f48'], hat: true },
+  { id: 'girder_bird', name: 'Girder Bird', egg: 'steel', rarity: 'rare', bonus: 2, kind: 'bird', c: ['#ff6a1a', '#ffe0c0', '#ffd23a'] },
+  { id: 'weld_wolf', name: 'Weld Wolf', egg: 'steel', rarity: 'epic', bonus: 4, kind: 'fox', c: ['#4a505a', '#c9ced6', '#3bd9ff'] },
+  { id: 'chrome_dragon', name: 'Chrome Dragon', egg: 'steel', rarity: 'legendary', bonus: 8, kind: 'dragon', c: ['#d6dde6', '#7d8590', '#3bd9ff'] },
+  // Golden Egg
+  { id: 'gold_bunny', name: 'Gold Bunny', egg: 'golden', rarity: 'common', bonus: 1.5, kind: 'bunny', c: ['#ffd23a', '#fff6c8', '#ff9a1a'] },
+  { id: 'gilded_bear', name: 'Gilded Bear', egg: 'golden', rarity: 'uncommon', bonus: 3, kind: 'bear', c: ['#f0b43a', '#fff0b8', '#a8650a'] },
+  { id: 'crown_cat', name: 'Crown Cat', egg: 'golden', rarity: 'rare', bonus: 6, kind: 'cat', c: ['#ffe066', '#fffbe0', '#ff4f9a'], hat: true },
+  { id: 'treasure_fox', name: 'Treasure Fox', egg: 'golden', rarity: 'epic', bonus: 12, kind: 'fox', c: ['#ffc21a', '#fff4c8', '#2bd96b'] },
+  { id: 'golden_dragon', name: 'Golden Dragon', egg: 'golden', rarity: 'legendary', bonus: 30, kind: 'dragon', c: ['#ffcf3a', '#fff2b0', '#ff3d6e'] },
+  // Spin wheel only.
+  { id: 'mech', name: 'Mech', egg: null, rarity: 'limited', bonus: 5, kind: 'robot', c: ['#ffd23a', '#4a505a', '#ff3d3d'] },
+]
+// Eggs in the hall. `odds` (%) line up with that egg's pets in PETS order. Every egg costs cash.
+// `side`/`row`: where its pedestal stands (-1 west / +1 east, 0 near the entrance / 1 deeper in).
+export const EGGS = [
+  { id: 'hazard', name: 'Hazard Egg', price: 1000, odds: [55, 28, 11, 5, 1], side: -1, row: 0, color: '#ffcc1a' },
+  { id: 'brick', name: 'Brick Egg', price: 10000, odds: [50, 30, 13, 6, 1], side: 1, row: 0, color: '#d0583a' },
+  { id: 'steel', name: 'Steel Egg', price: 100000, odds: [45, 32, 15, 7, 1], side: -1, row: 1, color: '#9aa3ad' },
+  { id: 'golden', name: 'Golden Egg', price: 1500000, odds: [32, 28, 22, 12, 6], side: 1, row: 1, color: '#ffcf3a' },
+]
+export const PET = {
+  slots: 3, // pets you can have out at once (+2 with the Pet Slots pass)
+  storage: 60, // pets you can own
+  merge: 5, // the same pet this many times at the Pet Merge machine -> one of the next tier
+  tiers: [
+    { name: '', mult: 1 },
+    { name: 'Golden', mult: 2.5 },
+    { name: 'Rainbow', mult: 6 },
+  ],
+  luck: 2, // Lucky Eggs pass: Epic and Legendary odds x this
+  near: { x: 3.6, z: 4 }, // half-size (m) of the box on the carpet beside a pedestal where its egg panel shows
+  hatchTime: 1.25, // s the eggs rock before they crack (auto hatch: autoTime)
+  autoTime: 0.55,
+}
+// Hatching passes (the egg panel's side buttons open the Shop on them): cash only.
+export const PET_PASSES = [
+  { id: 'egg3', name: '+3 Eggs', desc: 'Hatch 3 eggs at once (F / Multi)', price: 30000, multi: 3, icon: 'egg' },
+  { id: 'egg8', name: '+8 Eggs', desc: 'Hatch 8 eggs at once', price: 450000, multi: 8, icon: 'egg' },
+  { id: 'egg16', name: '+16 Eggs', desc: 'Hatch 16 eggs at once', price: 6000000, multi: 16, icon: 'egg' },
+  { id: 'lucky', name: 'Lucky Eggs', desc: '2x Epic and Legendary odds', price: 250000, icon: 'lucky' },
+  { id: 'slots', name: '+2 Pet Slots', desc: 'Equip 5 pets instead of 3', price: 350000, icon: 'paw' },
+]
+
+// --- Spin wheel (spin.js, spinUi.js) --------------------------------------------------------------------
+// Ten equal slices, clockwise from the top. `chance` is %, prizes: cash (x cashScale), gym (unlocks that
+// GYM tier for good; cash instead if you have it), pet, golden (+1 golden spin).
+export const SPIN = {
+  start: 3, // free spins on a new save
+  perBuilding: 1, // free spins for every building you help finish
+  pity: 40, // spins until the Mystery Jackpot
+  // Cash prizes and spin prices grow with buildings finished: x (1 + buildings * scale).
+  scale: 0.5,
+  turns: 6, // full turns before it settles
+  time: 4.2, // s a spin takes
+  buy: [
+    { n: 1, price: 15000 },
+    { n: 3, price: 42750, tag: 'SAVE 5%' },
+    { n: 10, price: 120000, tag: 'BEST -20%' },
+  ],
+  normal: [
+    { kind: 'cash', amount: 1400, chance: 46.6, color: '#ffc21a' },
+    { kind: 'pet', pet: 'mech', chance: 0.55, color: '#d94dff', tag: 'LIMITED' },
+    { kind: 'cash', amount: 3400, chance: 30, color: '#ff9a1a' },
+    { kind: 'gym', tier: 2, chance: 1.9, color: '#2f8fff' },
+    { kind: 'cash', amount: 8600, chance: 13, color: '#ff7a1a' },
+    { kind: 'golden', chance: 0.5, color: '#fff0b0' },
+    { kind: 'gym', tier: 9, chance: 0.2, color: '#e8263a', label: 'OP GYM' },
+    { kind: 'gym', tier: 3, chance: 1.9, color: '#8a3dff' },
+    { kind: 'gym', tier: 4, chance: 0.5, color: '#22b44a' },
+    { kind: 'cash', amount: 21000, chance: 4.85, color: '#ff5a1a' },
+  ],
+  golden: [
+    { kind: 'cash', amount: 12000, chance: 40, color: '#ffd84a' },
+    { kind: 'pet', pet: 'mech', chance: 2, color: '#d94dff', tag: 'LIMITED' },
+    { kind: 'cash', amount: 30000, chance: 25, color: '#ffb02a' },
+    { kind: 'gym', tier: 3, chance: 5, color: '#8a3dff' },
+    { kind: 'cash', amount: 75000, chance: 14, color: '#ff8a1a' },
+    { kind: 'pet', pet: 'mech', gold: 1, chance: 0.5, color: '#fff0b0', tag: 'GOLDEN' },
+    { kind: 'gym', tier: 9, chance: 1, color: '#e8263a', label: 'OP GYM' },
+    { kind: 'gym', tier: 4, chance: 4, color: '#22b44a' },
+    { kind: 'gym', tier: 7, chance: 2.5, color: '#3b6dff' },
+    { kind: 'cash', amount: 200000, chance: 6, color: '#ff5a1a' },
+  ],
+  // Mystery Jackpot after `pity` spins: the first of these you do not have yet, else jackpotCash.
+  jackpot: [{ kind: 'pet', pet: 'mech', gold: 1 }, { kind: 'gym', tier: 9 }, { kind: 'gym', tier: 8 }, { kind: 'gym', tier: 7 }],
+  jackpotCash: 500000,
+  dupeCash: 25000, // a gym prize you already have pays this (x cashScale) instead
+}
+
+// --- Robot Gear (robotGear.js, gear.js) ----------------------------------------------------------
+// Wearable robot gear, bought with cash at the Robot Gear hall (never gems). One piece is worn at
+// a time: blocks = how many blocks each block from your bag places, build = Build Speed multiplier,
+// walk = Walk Speed bonus in HUD units (the HUD shows m/s x 3.6), capacity = extra bag space.
+// `ability` (key G / the touch gear button): 'transform' (robot <-> vehicle), 'fly' (transform into
+// a jet; hold Jump to climb), 'drop' (a dropship delivers the armor with a ground slam and a timed
+// build boost).
+// `scale` = how much bigger the wearer gets (the mech suits are walking machines), `fly` = hold Jump
+// to fly in robot form ({ climb, sink } m/s).
+// `slot` = where the pedestal stands: hall rows by the walkway (side -1 west / 1 east), or the bar.
+export const ROBOT_GEAR = [
+  { id: 'jetboots', name: 'Jet Boots', price: 25000, blocks: 1.5, build: 2, walk: 10, capacity: 25, color: '#ff9a1a', glow: '#3bd9ff', row: 0, side: -1, fly: { climb: 8, sink: -2.2 } },
+  { id: 'gauntlets', name: 'Robot Gauntlets', price: 50000, blocks: 2, build: 1.75, walk: 15, capacity: 50, color: '#ffc21a', glow: '#ff7a1a', row: 0, side: 1 },
+  { id: 'arms', name: 'Robotic Arms', price: 100000, blocks: 2, build: 2, walk: 20, capacity: 200, color: '#e8ecf2', glow: '#ffc21a', row: 1, side: -1 },
+  { id: 'mech', name: 'Mech Suit', price: 2500000, blocks: 2.5, build: 2.5, walk: 30, capacity: 750, color: '#ffb81a', glow: '#3bd9ff', row: 1, side: 1, scale: 1.45 },
+  { id: 'blackmech', name: 'Black Mech Suit', price: 7500000, blocks: 3, build: 3, walk: 45, capacity: 1250, color: '#25272e', glow: '#3bd9ff', bar: 0, scale: 1.5, fly: { climb: 11, sink: -3 } },
+  { id: 'mixer', name: 'Mixer Transformer', price: 10000000, blocks: 4, build: 4, walk: 60, capacity: 1600, color: '#2f6fd0', glow: '#ff9a3b', bar: 1, ability: 'transform', vehicle: 'mixer', scale: 1.35 },
+  { id: 'titan', name: 'Titan Armor', price: 50000000, blocks: 8, build: 7, walk: 100, capacity: 3000, color: '#d61f2c', glow: '#ffd23a', bar: 2, ability: 'drop', scale: 1.25, fly: { climb: 14, sink: -3 } },
+  { id: 'truck', name: 'Truck Transformer', price: 20000000, blocks: 5, build: 5, walk: 75, capacity: 2000, color: '#7a3dd1', glow: '#ff5fd2', bar: 3, ability: 'transform', vehicle: 'truck', scale: 1.35 },
+  { id: 'jet', name: 'Jet Transformer', price: 30000000, blocks: 6, build: 6, walk: 90, capacity: 2000, color: '#f2f4f7', glow: '#ffc21a', bar: 4, ability: 'fly', vehicle: 'jet', scale: 1.3 },
+]
+export const ROBOT = {
+  maxWalk: 55, // m/s cap on walk speed with gear
+  vehicleSpeed: 1.45, // walk speed multiplier in vehicle form
+  vehicleScale: { mixer: 0.55, truck: 0.55, jet: 0.5 },
+  transformTime: 0.55, // s robot <-> vehicle
+  fly: { climb: 14, sink: -3.5, accel: 28, maxY: 260 }, // m/s while flying as a jet (hold Jump to climb)
+  flyAccel: 26, // m/s^2 toward the climb / sink speed for gear that flies in robot form
+  flyMaxY: 240, // m, flying gear stops climbing here
+  trail: 0.045, // s between thruster spark bursts
+  stride: 2.4, // m walked per heavy mech footstep (x body scale)
+  drop: { cooldown: 45, boost: 2, boostTime: 20, fallTime: 1.1, hover: 2.2 }, // Titan Armor's G
+  suitUp: 1.4, // s the equip assembly takes
 }
 
 // --- Free gift + daily rewards ------------------------------------------------------------------

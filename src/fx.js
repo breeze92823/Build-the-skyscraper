@@ -215,6 +215,34 @@ export function createFx(scene) {
         })
       }
     },
+    // Directed sparks (speed trails, rising power): every particle leaves (x, y, z) at
+    // (vx, vy, vz) plus jitter. o: { count, jitter, spread, spreadY, gravity, drag, size,
+    // shrink, life, colors, intensity }
+    streak(x, y, z, vx, vy, vz, o = {}) {
+      const n = Math.max(1, Math.round((o.count ?? 1) * scale))
+      const colors = o.colors ?? ['#ffffff']
+      const j = o.jitter ?? 0.4
+      const sp = o.spread ?? 0
+      const spy = o.spreadY ?? sp
+      const s = o.size ?? 0.25
+      for (let i = 0; i < n; i++) {
+        sparkPool.spawn({
+          x: x + rnd(-sp, sp),
+          y: y + rnd(-spy, spy),
+          z: z + rnd(-sp, sp),
+          vx: vx + rnd(-j, j),
+          vy: vy + rnd(-j, j),
+          vz: vz + rnd(-j, j),
+          g: o.gravity ?? 0,
+          drag: o.drag ?? 1.5,
+          max: (o.life ?? 0.45) * rnd(0.7, 1.2),
+          s0: s,
+          s1: s * (o.shrink ?? 0.3),
+          a: 1,
+          ...rgb(colors[i % colors.length], o.intensity ?? 3),
+        })
+      }
+    },
     // Soft puffs (dust, smoke). o: { count, size, grow, life, color, rise, spread }
     dust(x, y, z, o = {}) {
       const n = Math.round((o.count ?? 12) * scale)

@@ -149,3 +149,18 @@
   width: var(--side);
   height: var(--side);
 }
+
+/* Robot Gear ability (G): top-left of the thumb arc, only while the worn gear has one. */
+.touch-btn.ability {
+  display: none;
+  left: 0;
+  top: 0;
+  width: var(--side);
+  height: var(--side);
+  background: rgba(120, 40, 200, 0.6);
+  border-color: rgba(255, 210, 255, 0.8);
+  font-size: clamp(10px, 2.8vmin, 13px);
+}
+.gear-ability .touch-btn.ability {
+  display: flex;
+}

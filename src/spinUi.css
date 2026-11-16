@@ -1,0 +1,250 @@
+/* Spin Wheel window (spinUi.js). Lengths are design px x --uiw-u. */
+.w-spin { --uiw-w: 1100; --uiw-h: 640; }
+.w-spin .uiw-dialog {
+  background: linear-gradient(#3a2a5a, #241a3c);
+}
+.w-spin .uiw-body {
+  position: relative;
+  max-height: none;
+  overflow: visible;
+  padding-top: calc(40 * var(--uiw-u));
+}
+.sp-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(18 * var(--uiw-u));
+}
+
+/* Pity column. */
+.sp-pity {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(6 * var(--uiw-u));
+  width: calc(230 * var(--uiw-u));
+  min-width: 96px;
+  padding: calc(14 * var(--uiw-u)) calc(10 * var(--uiw-u));
+  border: max(2px, calc(5 * var(--uiw-u))) solid #1b1b24;
+  border-radius: calc(22 * var(--uiw-u));
+  background: linear-gradient(#ff7b8a, #e3263e);
+}
+.sp-pt { font-size: max(18px, calc(52 * var(--uiw-u))); line-height: 1; }
+.sp-coin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(130 * var(--uiw-u));
+  height: calc(130 * var(--uiw-u));
+  min-width: 52px;
+  min-height: 52px;
+  border: max(3px, calc(7 * var(--uiw-u))) solid #1b1b24;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #fff2a0, #ffc21a 60%, #e09a00);
+  font-size: max(26px, calc(76 * var(--uiw-u)));
+  color: #fff;
+  -webkit-text-stroke: max(2px, calc(6 * var(--uiw-u))) #1b1b24;
+  paint-order: stroke fill;
+  animation: sp-coin 2.4s ease-in-out infinite;
+}
+@keyframes sp-coin { 50% { transform: rotateY(180deg) scale(1.05); } }
+.sp-jp { font-size: max(10px, calc(24 * var(--uiw-u))); text-align: center; line-height: 1.05; }
+.sp-meter {
+  position: relative;
+  width: calc(64 * var(--uiw-u));
+  min-width: 24px;
+  height: calc(190 * var(--uiw-u));
+  min-height: 60px;
+  border: max(2px, calc(5 * var(--uiw-u))) solid #1b1b24;
+  border-radius: calc(16 * var(--uiw-u));
+  background: #3a0a10;
+  overflow: hidden;
+}
+.sp-meter > div {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(#ffe066, #ffb21a);
+  transition: height 0.4s;
+}
+.sp-count { font-size: max(16px, calc(44 * var(--uiw-u))); color: #ffd23a; line-height: 1; }
+.sp-togo { font-size: max(10px, calc(22 * var(--uiw-u))); }
+
+/* Wheel. */
+.sp-mid { flex: 1; display: flex; justify-content: center; min-width: 0; }
+.sp-wheel {
+  position: relative;
+  width: min(calc(520 * var(--uiw-u)), 100%);
+  aspect-ratio: 1;
+}
+.sp-rotor {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+.sp-wheel-svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 calc(8 * var(--uiw-u)) 0 rgba(0, 0, 0, 0.35)); }
+.sp-wheel-svg text {
+  fill: #fff;
+  stroke: #1b1b24;
+  stroke-width: 2.2px;
+  paint-order: stroke fill;
+  text-anchor: middle;
+  font-family: 'Fredoka', system-ui, sans-serif;
+  font-weight: 700;
+}
+.sp-pct { font-size: 9px; }
+.sp-l1 { font-size: 11px; }
+.sp-l2 { font-size: 7.5px; }
+.sp-wheel.golden .sp-wheel-svg { filter: drop-shadow(0 0 calc(18 * var(--uiw-u)) #ffd23a); }
+.sp-pointer {
+  position: absolute;
+  left: 50%;
+  top: calc(-14 * var(--uiw-u));
+  width: calc(56 * var(--uiw-u));
+  height: calc(64 * var(--uiw-u));
+  min-width: 22px;
+  min-height: 26px;
+  transform: translateX(-50%);
+  background: #ff7a1a;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  filter: drop-shadow(0 3px 0 #1b1b24);
+}
+.sp-hub {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 31%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: max(3px, calc(7 * var(--uiw-u))) solid #1b1b24;
+  border-radius: 50%;
+  background: radial-gradient(circle at 45% 35%, #ffb04a, #ff6a1a 60%, #d84a00);
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: inset 0 calc(-8 * var(--uiw-u)) 0 rgba(120, 30, 0, 0.4);
+  transition: transform 0.1s;
+}
+.sp-hub:active { transform: translate(-50%, -50%) scale(0.94); }
+.sp-hub:disabled { cursor: default; filter: saturate(0.6); }
+.sp-hub span { font-size: max(18px, calc(56 * var(--uiw-u))); font-style: italic; line-height: 1; }
+.sp-hub small { font-size: max(11px, calc(26 * var(--uiw-u))); }
+.sp-wheel.golden .sp-hub { background: radial-gradient(circle at 45% 35%, #fff2a0, #ffc21a 60%, #e09a00); }
+
+/* Right column. */
+.sp-right {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: calc(10 * var(--uiw-u));
+  width: calc(290 * var(--uiw-u));
+  min-width: 120px;
+}
+.sp-mode {
+  position: relative;
+  min-height: max(48px, calc(120 * var(--uiw-u)));
+  border: max(2px, calc(5 * var(--uiw-u))) solid #1b1b24;
+  border-radius: calc(20 * var(--uiw-u));
+  font-family: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.sp-mode.on { opacity: 1; box-shadow: 0 0 0 max(2px, calc(5 * var(--uiw-u))) #fff; }
+.sp-mode.normal { background: linear-gradient(#ff6b6b, #e3262e); }
+.sp-mode.golden { background: linear-gradient(#ffe066, #e0a000); }
+.sp-mode span { font-size: max(15px, calc(44 * var(--uiw-u))); line-height: 1; }
+.sp-mode b {
+  position: absolute;
+  top: calc(-14 * var(--uiw-u));
+  right: calc(-14 * var(--uiw-u));
+  min-width: max(30px, calc(58 * var(--uiw-u)));
+  padding: 2px 6px;
+  border: max(2px, calc(4 * var(--uiw-u))) solid #1b1b24;
+  border-radius: 99px;
+  background: #fff;
+  color: #ff3d6e;
+  -webkit-text-stroke: 0;
+  font-size: max(12px, calc(28 * var(--uiw-u)));
+}
+.sp-pack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: calc(8 * var(--uiw-u));
+  border: max(2px, calc(4 * var(--uiw-u))) solid #1b1b24;
+  border-radius: calc(18 * var(--uiw-u));
+  background: linear-gradient(#b98bff, #7a3dff);
+}
+.sp-tag { font-size: max(10px, calc(22 * var(--uiw-u))); color: #ffd23a; line-height: 1; }
+.sp-pn { font-size: max(13px, calc(30 * var(--uiw-u))); line-height: 1; }
+.uiw-btn.sp-buy {
+  width: 100%;
+  height: max(36px, calc(52 * var(--uiw-u)));
+  font-size: max(14px, calc(28 * var(--uiw-u)));
+}
+.sp-foot {
+  text-align: center;
+  font-size: max(14px, calc(36 * var(--uiw-u)));
+  color: #ffd23a;
+}
+
+/* Result card over the window. */
+.sp-result {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 10, 40, 0.55);
+  border-radius: calc(26 * var(--uiw-u));
+  z-index: 2;
+}
+.sp-result[hidden] { display: none; }
+.sp-rcard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(8 * var(--uiw-u));
+  padding: calc(20 * var(--uiw-u)) calc(34 * var(--uiw-u));
+  border: max(3px, calc(6 * var(--uiw-u))) solid #1b1b24;
+  border-radius: calc(26 * var(--uiw-u));
+  background: radial-gradient(circle at 50% 30%, #fff, #e6e9f2);
+  animation: gf-in 0.5s cubic-bezier(0.3, 1.8, 0.5, 1);
+  max-width: 90%;
+}
+.sp-result.jackpot .sp-rcard { background: radial-gradient(circle at 50% 30%, #fff8c8, #ffc21a); }
+.sp-rjp { font-size: max(16px, calc(40 * var(--uiw-u))); color: #ff3d6e; }
+.sp-ricon { width: calc(130 * var(--uiw-u)); height: calc(130 * var(--uiw-u)); min-width: 64px; min-height: 64px; }
+.sp-ricon svg { width: 100%; height: 100%; display: block; }
+.sp-rtitle { font-size: max(18px, calc(44 * var(--uiw-u))); text-align: center; color: #7dff6b; }
+.sp-rsub { font-size: max(12px, calc(22 * var(--uiw-u))); font-weight: 500; color: #4a4f5c; text-align: center; }
+
+/* Narrow screens: wheel on top, the columns under it. */
+@media (max-width: 700px) and (orientation: portrait) {
+  .w-spin { --uiw-w: 640; --uiw-h: 1000; }
+  .sp-wrap { flex-wrap: wrap; justify-content: center; }
+  .sp-mid { order: -1; flex-basis: 100%; }
+  .sp-wheel { width: min(84vw, 420px); }
+  .sp-pity { width: 40%; }
+  .sp-meter { height: 70px; }
+  .sp-coin { display: none; }
+  .sp-right { width: 52%; }
+  .sp-mode { min-height: 52px; }
+}
+@media (max-height: 480px) and (orientation: landscape) {
+  .w-spin .uiw-body { padding-top: 22px; gap: 4px; }
+  .sp-coin { display: none; }
+  .sp-meter { height: 60px; }
+  .sp-foot { font-size: 13px; }
+  .sp-mode { min-height: 40px; }
+  .sp-mode span { font-size: 13px; }
+  .sp-pack { padding: 3px; }
+  .sp-tag { display: none; }
+}

@@ -125,12 +125,22 @@ function makeBackpack() {
 // Dresses an avatar root (rig units inside, scaled to metres). Returns
 // { setFill(fill, extra), setMuscle(m) }.
 export function dressWorker(root, { hat = '#ffd21a', vest = true } = {}) {
+  // The bind pose, before any animation moves the bones: gear.js attaches armour against it.
+  if (!root.userData.restPose) {
+    const rest = new Map()
+    root.traverse((o) => {
+      if (o.isBone) rest.set(o, o.quaternion.clone())
+    })
+    root.userData.restPose = rest
+  }
   if (vest) {
     const v = shadowed(new Mesh(new BoxGeometry(2.98, 2.2, 1.78), vestMaterial()))
+    v.name = 'workVest' // gear.js hides it under a full suit
     attach(root, 'Spine1', v, new Vector3(0, 3.62, 0))
   }
   if (hat) {
     const h = new Group()
+    h.name = 'hardHat' // gear.js hides it under a helmet
     const dome = shadowed(new Mesh(new SphereGeometry(0.98, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), hatMaterial(hat)))
     const brim = shadowed(new Mesh(new CylinderGeometry(1.18, 1.18, 0.1, 18), hatMaterial(hat)))
     brim.position.set(0, -0.02, 0.15)
@@ -140,6 +150,7 @@ export function dressWorker(root, { hat = '#ffd21a', vest = true } = {}) {
     attach(root, 'Neck1', h, new Vector3(0, 6.18, 0))
   }
   const pack = makeBackpack()
+  pack.group.name = 'workPack' // gear.js hides it under a suit that has its own back unit
   attach(root, 'Spine1', pack.group, new Vector3(0, 3.6, -1.15))
   const n = root.nodes
   // Base values the SDK proportions set (re-applied by applyProportions); muscles multiply in.

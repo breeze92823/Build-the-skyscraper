@@ -92,6 +92,11 @@ export function setNeonColor(m, color) {
   m.userData.base.set(color)
   applyNeon(m)
 }
+// Brightness of a neon material (its HDR multiplier), e.g. a machine glowing while in use.
+export function setNeonK(m, k) {
+  m.userData.k = k
+  applyNeon(m)
+}
 export function setNeonBloom(on) {
   neonBloom = on
   for (const m of neonMats) applyNeon(m)

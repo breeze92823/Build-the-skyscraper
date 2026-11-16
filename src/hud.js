@@ -1,5 +1,5 @@
 import './hud.css'
-import { RANKS, SHOP } from './config.js'
+import { INSIDE, RANKS, SHOP } from './config.js'
 import { ICONS } from './hudIcons.js'
 import { replay } from './uiWindow.js'
 import { clock, commas, short } from './stats.js'
@@ -88,8 +88,12 @@ export function createHud() {
     grid.append(b)
     return b
   }
+  menu(ICONS.pets, 'PETS', 'pets', 'pets')
   menu(ICONS.shop, 'SHOP', 'shop')
   menu(ICONS.upgrades, 'UPGRADES', 'upgrades')
+  const bSpin = menu(ICONS.spin, 'SPIN', 'spin', 'spin')
+  const spinBadge = bSpin.querySelector('.hb-badge')
+  spinBadge.classList.add('count')
   const bSpeed = menu(ICONS.speed, '2x Speed', 'pass', 'pass', 'spd2')
   const bStr = menu(ICONS.strength, '2x Strength', 'pass', 'pass', 'str2')
   const bGift = menu(ICONS.gift, 'FREE', 'gift', 'gift')
@@ -119,8 +123,12 @@ export function createHud() {
   const rdFill = ride.querySelector('.rd-bar > div')
   ride.hidden = true
   const pops = el('div', 'hud-pops')
+  // A dark strip across the middle of the screen ("The building is complete! Go inside!").
+  const notice = el('div', 'hud-notice', '<span class="hud-txt"></span>')
+  const noticeText = notice.firstChild
+  notice.hidden = true
   const toastEl = el('div', 'hud-toast hud-txt', '')
-  root.append(top, left, right, status, keys, train, ride, pops, toastEl)
+  root.append(top, left, right, status, keys, train, ride, notice, pops, toastEl)
   document.body.append(root)
 
   // Taps on the LIFT button use pointerdown so rapid taps are not eaten by the click delay.
@@ -167,7 +175,7 @@ export function createHud() {
     setReserved,
     // s: { cash, speed, walk, strength, bag, cap, buildings, crew, crewCount, rankIdx, totalBlocks,
     //      tower: { placed, total, floor, floors, name, done }, event: { name, color, left, length } | null,
-    //      nextEvent, passes, giftIn, dailyReady, eta, muted }
+    //      nextEvent, passes, giftIn, dailyReady, eta, muted, spins }
     update(dt, s) {
       setText('cash', sCash.val, `$${short(s.cash)}`)
       setText('speed', sSpeed.val, short(s.speed))
@@ -182,9 +190,12 @@ export function createHud() {
       setText('crewsub', sCrew.sub, s.crewCount ? `Crew: ${s.crewCount} (+10% each)` : 'Add crew: +10% each')
       // Tower.
       const t = s.tower
-      setText('bar', barText, t.done ? 'BUILDING COMPLETE!' : `${commas(t.placed)} / ${commas(t.total)}`)
-      setStyle('barw', barFill, 'width', `${((t.placed / Math.max(1, t.total)) * 100).toFixed(2)}%`)
-      setText('sub', sub, `${t.name}  ·  Floor ${t.floor}/${t.floors}`)
+      // Open (finished) building: the bar counts down the time left to go inside.
+      const inside = t.openLeft != null
+      setText('bar', barText, inside ? `${INSIDE.mult}X INSIDE  ${clock(t.openLeft)}` : t.done ? 'BUILDING COMPLETE!' : `${commas(t.placed)} / ${commas(t.total)}`)
+      setStyle('barw', barFill, 'width', inside ? '100%' : `${((t.placed / Math.max(1, t.total)) * 100).toFixed(2)}%`)
+      bar.classList.toggle('inside', inside)
+      setText('sub', sub, inside ? `${t.name}  ·  Complete` : `${t.name}  ·  Floor ${t.floor}/${t.floors}`)
       // Event.
       if (s.event) {
         setText('evl', evLabel, 'EVENT')
@@ -228,6 +239,8 @@ export function createHud() {
       bGift.classList.toggle('ready', giftReady)
       bDaily.querySelector('.hb-badge').hidden = !s.dailyReady
       bGift.querySelector('.hb-badge').hidden = !giftReady
+      spinBadge.hidden = !s.spins
+      setText('spins', spinBadge, s.spins > 99 ? '99+' : String(s.spins ?? 0))
       if (last.muted !== s.muted) {
         last.muted = s.muted
         bSound.innerHTML = s.muted ? ICONS.mute : ICONS.sound
@@ -294,6 +307,19 @@ export function createHud() {
       p.addEventListener('animationend', () => p.remove())
       pops.append(p)
       if (pops.childElementCount > 24) pops.firstChild.remove()
+    },
+    // A stat reward: the stat's icon and "+N", floating up from (x, y).
+    statPop(x, y, kind, text) {
+      const p = el('div', 'hud-pop hud-stat-pop', `<span class="hsp-icon">${kind === 'speed' ? ICONS.speed : ICONS.strength}</span><span class="hud-txt">${text}</span>`)
+      p.style.left = `${x}px`
+      p.style.top = `${y}px`
+      p.addEventListener('animationend', () => p.remove())
+      pops.append(p)
+      if (pops.childElementCount > 24) pops.firstChild.remove()
+    },
+    notice(text) {
+      notice.hidden = !text
+      if (text) setText('notice', noticeText, text)
     },
     training(on, label = 'LIFT!') {
       train.hidden = !on
