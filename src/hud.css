@@ -228,7 +228,7 @@
   width: max(26px, calc(58 * var(--u)));
   height: max(26px, calc(58 * var(--u)));
   flex: none;
-  filter: drop-shadow(0 calc(3 * var(--u)) 0 rgba(0, 0, 0, 0.35));
+  /* No CSS filter: the stat row pulses (scale animation) and filtered layers flash black on some GPUs. */
 }
 .hs-icon svg {
   width: 100%;
@@ -367,7 +367,8 @@
 .hb-icon {
   width: max(36px, calc(76 * var(--u)));
   height: max(36px, calc(76 * var(--u)));
-  filter: drop-shadow(0 calc(4 * var(--u)) 0 rgba(0, 0, 0, 0.35));
+  /* No CSS filter here: this icon wiggles / scales (gift, hover), and an animated filtered layer
+     makes some GPUs flash black rectangles. */
 }
 .hb-icon svg {
   width: 100%;
