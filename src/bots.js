@@ -1,5 +1,5 @@
 import { Group, Vector3 } from 'three'
-import { BOTS, GYM, LAYOUT, STATS } from './config.js'
+import { BOTS, GYM, INSIDE, LAYOUT, STATS } from './config.js'
 import { makeAnimator } from './avatar/animator.js'
 import { dressWorker, makeBotBody, makeNameTag } from './characters.js'
 import { rankIndex } from './stats.js'
@@ -7,11 +7,12 @@ import { rankIndex } from './stats.js'
 // The other workers on the server. Each one loops like a player does: fill the bag in the
 // pit, walk to the crew cage, ride up, place blocks on the roof (the same shared tower),
 // ride down, and now and then train at the gym. They show up on the leaderboards, and
-// you can add them to your crew for a cash bonus.
+// you can add them to your crew for a cash bonus. While a finished building is open they
+// head into its lobby (lobby.js) and hang out by the lounges, training like you do.
 
 const HATS = ['#ffd21a', '#ffffff', '#ff7a1a', '#3bc8ff', '#2fd06b', '#ff4d6d', '#b45cff']
 
-export function createBots(scene, { tower, elevator, pit, gym, fx }) {
+export function createBots(scene, { tower, elevator, pit, gym, fx, lobby }) {
   const P = LAYOUT.pit
   const nodes = {
     pitGate: { x: P.x + P.w / 2 + 1.5, z: P.z },
@@ -96,6 +97,17 @@ export function createBots(scene, { tower, elevator, pit, gym, fx }) {
     route(b, [nodes.pitGate, nodes.west, nodes.plaza, nodes.gymEntry, { x: st.x, z: LAYOUT.gym.z }, { x: st.x, z: st.z }])
     b.state = 'toGym'
   }
+  function goLobby(b) {
+    const s = lobby?.spots()
+    if (!s?.seats.length) return false
+    const seat = s.seats[(b.i * 3 + Math.floor(Math.random() * 3)) % s.seats.length]
+    const fromWest = b.pos.x < -30
+    route(b, [...(fromWest ? [nodes.west] : []), { x: s.out.x + rnd(-1, 1), z: s.out.z }, s.in, { x: seat.x + rnd(-0.6, 0.6), z: seat.z + rnd(-0.6, 0.6) }])
+    b.look = seat.look
+    b.state = 'toLobby'
+    b.lobbyT = 0
+    return true
+  }
   bots.forEach((b) => goPit(b))
 
   // Walks along the path; returns true once at the end.
@@ -147,12 +159,19 @@ export function createBots(scene, { tower, elevator, pit, gym, fx }) {
     const crew = elevator.crew
     const spots = elevator.spots()
     const roofY = tower.roofY
+    const open = !!tower.lobby
     for (const b of bots) {
       b.playtime += dt
       b.moving = 0
       b.t += dt
       let activity = null
       let y = 0
+      // A building just opened: whoever is on the ground walks in (staggered).
+      if (open && (b.state === 'toPit' || b.state === 'collect' || b.state === 'toLift' || b.state === 'waitLift' || b.state === 'leaveLift') && Math.random() < dt * 0.5) goLobby(b)
+      if (!open && (b.state === 'toLobby' || b.state === 'lobby')) {
+        if (b.pos.y > 0.5) reset(b)
+        else goPit(b)
+      }
       switch (b.state) {
         case 'toPit':
           if (walk(b, dt)) {
@@ -270,6 +289,28 @@ export function createBots(scene, { tower, elevator, pit, gym, fx }) {
         case 'leaveLift':
           if (walk(b, dt)) goPit(b)
           break
+        case 'toLobby': {
+          const s = lobby.spots()
+          // Up the steps once past the door.
+          if (s && b.path.length <= 2) y = s.y
+          if (walk(b, dt)) {
+            b.state = 'lobby'
+            b.t = 0
+          }
+          break
+        }
+        case 'lobby': {
+          y = lobby.spots()?.y ?? 0
+          if (b.look) b.facing = Math.atan2(b.look.x - b.pos.x, b.look.z - b.pos.z)
+          b.lobbyT += dt
+          if (b.lobbyT > INSIDE.every) {
+            b.lobbyT = 0
+            const best = GYM.tiers.reduce((m, t) => (t.price == null && b.buildings >= t.need ? Math.max(m, t.mult) : m), 1)
+            b.strength += INSIDE.base * INSIDE.mult * best
+            b.speed += INSIDE.base * INSIDE.mult * best
+          }
+          break
+        }
         case 'toGym':
           if (walk(b, dt)) {
             b.state = 'train'
@@ -284,6 +325,7 @@ export function createBots(scene, { tower, elevator, pit, gym, fx }) {
             b.repT = 0
             if (st.kind === 'strength') b.strength += tier.mult
             else b.speed += tier.mult
+            gym.rep(st, false)
           }
           b.rep = 0.5 + 0.5 * Math.sin((b.repT / GYM.repEvery) * Math.PI * 2 - Math.PI / 2)
           if (st.kind === 'strength') {
@@ -296,8 +338,7 @@ export function createBots(scene, { tower, elevator, pit, gym, fx }) {
             b.pos.set(st.stand.x, 0, st.stand.z)
             y = st.stand.y
             b.facing = st.stand.facing
-            b.moving = 9
-            st.belt.offset.y += dt * 3
+            b.moving = 9 // gym.update runs the belt of any occupied treadmill
           }
           if (b.t > 18 + b.i * 2) {
             if (st.bar) st.bar.position.y = st.barRest
@@ -309,7 +350,7 @@ export function createBots(scene, { tower, elevator, pit, gym, fx }) {
           break
         }
       }
-      if (b.state === 'toBuild' || b.state === 'build' || b.state === 'toExit' || b.state === 'waitDown' || b.state === 'boardDown') {
+      if (b.state === 'toBuild' || b.state === 'build' || b.state === 'toExit' || b.state === 'waitDown' || b.state === 'boardDown' || b.state === 'lobby' || b.state === 'toLobby') {
         if (tower.sinking) reset(b)
       }
       b.pos.y = y

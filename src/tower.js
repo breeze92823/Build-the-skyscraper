@@ -16,7 +16,7 @@ import {
   TorusGeometry,
   Vector3,
 } from 'three'
-import { BUILDING_SCALE, BUILDINGS, ELEVATOR, LAYOUT, STAIRS, TOWER } from './config.js'
+import { BUILDING_SCALE, BUILDINGS, ELEVATOR, INSIDE, LAYOUT, STAIRS, TOWER } from './config.js'
 import { RAPIER, addFixed, world } from './physics.js'
 import { neon } from './propkit.js'
 import { blockMaterial } from './site.js'
@@ -29,8 +29,9 @@ import { mulberry32, paintConcrete, paintWindows, toTexture } from './textures.j
 // with a glowing green edge, and the floor in progress shows as stone blocks popping onto
 // the roof, filling it from the elevator side outward. Collision: a trimesh prism up to
 // the roof plus an invisible parapet with gaps at the elevator and stair exits.
-// When the last floor is done the crown goes on, the building stands for a while, then
-// sinks into the sand and the next one starts.
+// When the last floor is done the crown goes on and the building stays open for
+// INSIDE.time: its two lowest floors turn into a lobby with a doorway on the south face
+// (lobby.js furnishes it), then it sinks into the sand and the next one starts.
 
 export function buildingSpec(n) {
   const S = BUILDING_SCALE
@@ -96,6 +97,12 @@ export function createTower(scene, saved) {
   const popping = [] // { i, t }
   let rising = null // { t } newest floor growing in
   const anchors = {}
+  // The lobby (open phase): floor top, ceiling, the glass panels cut away for the door.
+  const lobbyY0 = TOWER.foundation + TOWER.slab
+  const lobbyY1 = TOWER.foundation + INSIDE.floors * TOWER.floorHeight
+  let lobbyShell = null
+  const door = { edges: new Set(), x: 0, z: 0, ax: 0, az: 0, bx: 0, bz: 0, width: 0, yaw: 0 }
+  let crownR = 8
 
   // --- Colliders -----------------------------------------------------------------------------
   let colliders = []
@@ -110,9 +117,38 @@ export function createTower(scene, saved) {
     const y = roofY()
     const fnd = prismTrimesh(offset(pts, 1.6), -0.5, TOWER.foundation, C.x, C.z)
     colliders.push(addFixed(RAPIER.ColliderDesc.trimesh(fnd.vertices, fnd.indices), { x: 0, y: 0, z: 0 }))
+    const trimesh = (t) => colliders.push(addFixed(RAPIER.ColliderDesc.trimesh(t.vertices, t.indices), { x: 0, y: 0, z: 0 }))
+    if (lobbyShell) {
+      // Open: a floor plate, glass walls (a gap at the door), a ceiling and the rest on top.
+      trimesh(prismTrimesh(offset(pts, 0.35), 0, lobbyY0, C.x, C.z))
+      const h = lobbyY1 - lobbyY0
+      for (let i = 0; i < pts.length; i++) {
+        if (door.edges.has(i)) continue
+        const [ax, az] = pts[i]
+        const [bx, bz] = pts[(i + 1) % pts.length]
+        const len = Math.hypot(bx - ax, bz - az)
+        const yaw = Math.atan2(-(bz - az), bx - ax)
+        colliders.push(
+          addFixed(RAPIER.ColliderDesc.cuboid(len / 2 + 0.15, h / 2, 0.15), { x: C.x + (ax + bx) / 2, y: lobbyY0 + h / 2, z: C.z + (az + bz) / 2 }, { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }),
+        )
+      }
+      trimesh(prismTrimesh(pts, lobbyY1 - 0.05, lobbyY1, C.x, C.z))
+      trimesh(prismTrimesh(pts, lobbyY1, y, C.x, C.z))
+      // The crown stands on the roof: walk round it.
+      const kind = spec.def.crown
+      if (kind === 'ring') {
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2
+          colliders.push(addFixed(RAPIER.ColliderDesc.cylinder(4, 0.5), { x: C.x + Math.cos(a) * crownR, y: y + 4, z: C.z + Math.sin(a) * crownR }))
+        }
+      } else {
+        const ch = kind === 'spire' ? 6 : crownR * 0.75
+        colliders.push(addFixed(RAPIER.ColliderDesc.cylinder(ch / 2, crownR * (kind === 'spire' ? 1 : 0.92)), { x: C.x, y: y + ch / 2, z: C.z }))
+      }
+    } else if (floors > 0) {
+      trimesh(prismTrimesh(pts, 0, y, C.x, C.z))
+    }
     if (floors > 0) {
-      const body = prismTrimesh(pts, 0, y, C.x, C.z)
-      colliders.push(addFixed(RAPIER.ColliderDesc.trimesh(body.vertices, body.indices), { x: 0, y: 0, z: 0 }))
       // Parapet: an invisible wall round the roof edge, open at the exits.
       const H = 2.4
       for (let i = 0; i < pts.length; i++) {
@@ -132,7 +168,7 @@ export function createTower(scene, saved) {
 
   // --- Building swap ------------------------------------------------------------------------
   function disposeBuilding() {
-    for (const m of [floorsMesh, foundation, roof, edge, blocks, crown]) {
+    for (const m of [floorsMesh, foundation, roof, edge, blocks, crown, lobbyShell]) {
       if (!m) continue
       group.remove(m)
       m.traverse?.((o) => {
@@ -144,6 +180,7 @@ export function createTower(scene, saved) {
     glassMat?.map?.dispose()
     glassMat?.emissiveMap?.dispose()
     crown = null
+    lobbyShell = null
   }
 
   function computeAnchors() {
@@ -169,6 +206,52 @@ export function createTower(scene, saved) {
     ]
     // The spot on the roof just inside the elevator exit (where the fill starts).
     anchors.roofEntry = { x: anchors.liftX, z: anchors.liftWall - 2 }
+
+    // Lobby door: the south-face wall panels whose middle is within half a door of doorX.
+    const dz = southEdgeAt(pts, INSIDE.doorX) ?? 0
+    door.edges.clear()
+    let a = null
+    let b = null
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i]
+      const q = pts[(i + 1) % pts.length]
+      if (Math.abs((p[0] + q[0]) / 2 - INSIDE.doorX) < INSIDE.doorW / 2 && (p[1] + q[1]) / 2 > dz - 2) {
+        door.edges.add(i)
+        for (const v of [p, q]) {
+          if (!a || v[0] < a[0]) a = v
+          if (!b || v[0] > b[0]) b = v
+        }
+      }
+    }
+    if (!a) a = b = [INSIDE.doorX, dz]
+    door.ax = a[0]
+    door.az = a[1]
+    door.bx = b[0]
+    door.bz = b[1]
+    door.x = (a[0] + b[0]) / 2
+    door.z = (a[1] + b[1]) / 2
+    door.width = Math.hypot(b[0] - a[0], b[1] - a[1])
+    door.yaw = Math.atan2(-(b[1] - a[1]), b[0] - a[0])
+    // The crown leaves room for the roof hut and a walkway along the south edge.
+    let rMin = Infinity
+    for (const [x, z] of pts) rMin = Math.min(rMin, Math.hypot(x, z))
+    const room = Math.max(4, rMin - INSIDE.hutClear)
+    const k = { spire: 0.5, dome: 0.7, ring: 0.6 }[spec.def.crown] ?? 0.5
+    crownR = Math.min(spec.size * k, room)
+  }
+
+  // Finished: the two lowest floors become one tall glass lobby with the doorway cut out.
+  function openLobby() {
+    if (lobbyShell || floors < spec.floors) return
+    const zero = new Matrix4().makeScale(0, 0, 0)
+    for (let f = 0; f < INSIDE.floors; f++) floorsMesh.setMatrixAt(f, zero)
+    floorsMesh.instanceMatrix.needsUpdate = true
+    const geo = floorGeometry(spec.pts, INSIDE.floors * TOWER.floorHeight, TOWER.slab, 0.35, 0.12, (i) => door.edges.has(i))
+    lobbyShell = new Mesh(geo, [slabMat, glassMat])
+    lobbyShell.position.y = TOWER.foundation
+    lobbyShell.castShadow = true
+    lobbyShell.receiveShadow = true
+    group.add(lobbyShell)
   }
 
   function computeCells() {
@@ -207,9 +290,9 @@ export function createTower(scene, saved) {
     const frame = new MeshStandardMaterial({ color: def.frame, roughness: 0.4, metalness: 0.3 })
     const light = neon('#ff3030', 3)
     if (def.crown === 'spire') {
-      const base = new Mesh(new CylinderGeometry(spec.size * 0.35, spec.size * 0.5, 6, 8), glassMat)
+      const base = new Mesh(new CylinderGeometry(crownR * 0.7, crownR, 6, 8), glassMat)
       base.position.y = 3
-      const cone = new Mesh(new ConeGeometry(spec.size * 0.33, 16, 8), frame)
+      const cone = new Mesh(new ConeGeometry(crownR * 0.66, 16, 8), frame)
       cone.position.y = 14
       const mast = new Mesh(new CylinderGeometry(0.25, 0.4, 22, 6), frame)
       mast.position.y = 31
@@ -218,17 +301,17 @@ export function createTower(scene, saved) {
       tip.name = 'beacon'
       g.add(base, cone, mast, tip)
     } else if (def.crown === 'dome') {
-      const dome = new Mesh(new SphereGeometry(spec.size * 0.7, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), glassMat)
-      const ring = new Mesh(new TorusGeometry(spec.size * 0.72, 0.5, 8, 40), frame)
+      const dome = new Mesh(new SphereGeometry(crownR, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), glassMat)
+      const ring = new Mesh(new TorusGeometry(crownR * 1.03, 0.5, 8, 40), frame)
       ring.rotation.x = Math.PI / 2
       const mast = new Mesh(new CylinderGeometry(0.2, 0.35, 14, 6), frame)
-      mast.position.y = spec.size * 0.7 + 6
+      mast.position.y = crownR + 6
       const tip = new Mesh(new SphereGeometry(0.6, 10, 8), light)
-      tip.position.y = spec.size * 0.7 + 13.5
+      tip.position.y = crownR + 13.5
       tip.name = 'beacon'
       g.add(dome, ring, mast, tip)
     } else {
-      const halo = new Mesh(new TorusGeometry(spec.size * 0.6, 0.9, 10, 48), neon(def.glass, 3))
+      const halo = new Mesh(new TorusGeometry(crownR, 0.9, 10, 48), neon(def.glass, 3))
       halo.rotation.x = Math.PI / 2
       halo.position.y = 8
       halo.name = 'halo'
@@ -236,7 +319,7 @@ export function createTower(scene, saved) {
       for (let i = 0; i < 6; i++) {
         const p = new Mesh(new CylinderGeometry(0.4, 0.4, 8, 6), frame)
         const a = (i / 6) * Math.PI * 2
-        p.position.set(Math.cos(a) * spec.size * 0.6, 4, Math.sin(a) * spec.size * 0.6)
+        p.position.set(Math.cos(a) * crownR, 4, Math.sin(a) * crownR)
         posts.add(p)
       }
       g.add(halo, posts)
@@ -310,6 +393,7 @@ export function createTower(scene, saved) {
       crown = makeCrown()
       crown.position.y = roofY()
       group.add(crown)
+      openLobby()
     }
     buildColliders()
     emit('building', api)
@@ -390,6 +474,7 @@ export function createTower(scene, saved) {
       crown.position.y = roofY()
       crown.scale.setScalar(0.01)
       group.add(crown)
+      openLobby()
     }
     buildColliders()
     emit('floor', { floor: floors, of: spec.floors, done })
@@ -495,7 +580,7 @@ export function createTower(scene, saved) {
       const halo = crown.getObjectByName('halo')
       if (halo) halo.rotation.z = elapsed * 0.6
     }
-    if (phase === 'celebrate' && phaseTime > TOWER.celebrate) {
+    if (phase === 'celebrate' && phaseTime > INSIDE.time) {
       phase = 'sinking'
       phaseTime = 0
       clearColliders()
@@ -534,6 +619,15 @@ export function createTower(scene, saved) {
     get sinking() {
       return phase === 'sinking'
     },
+    get openLeft() {
+      return phase === 'celebrate' ? Math.max(0, INSIDE.time - phaseTime) : 0
+    },
+    // The open lobby (null unless the finished building is open): floor and ceiling y and
+    // the doorway (local to the centre: the chord ax,az -> bx,bz across the cut-out glass).
+    get lobby() {
+      return lobbyShell && phase === 'celebrate' ? { y0: lobbyY0, y1: lobbyY1, door, crownR } : null
+    },
+    group,
     center: C,
     anchors,
     addBlocks,

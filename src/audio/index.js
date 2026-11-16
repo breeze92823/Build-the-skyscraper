@@ -7,8 +7,9 @@
 import { installAudio as installCore, isMuted, onStart, setDucked, setMuted, setVolume, toggleMuted, A } from './core.js'
 import * as sfx from './sfx.js'
 import * as game from './game.js'
+import * as robot from './robot.js'
 
-export { sfx, game, setVolume, setMuted, isMuted, toggleMuted }
+export { sfx, game, robot, setVolume, setMuted, isMuted, toggleMuted }
 
 function onPress(e) {
   if (e.button > 0) return

@@ -23,6 +23,9 @@ export const player = {
   // is set, the feet are put exactly there every tick.
   locked: false,
   hold: null, // { x, y, z } or null
+  // Flying (Robot Gear jet form): { climb, sink, accel, maxY } replaces gravity; holding Jump climbs,
+  // letting go glides down at `sink`.
+  fly: null,
 }
 
 const HALF = PLAYER_DIMS.height / 2 // capsule centre above the feet
@@ -141,7 +144,12 @@ function step(dt) {
   }
   jumpQueued = Math.max(0, jumpQueued - dt)
 
-  player.velocity.y += PHYSICS.gravity * dt
+  const F = player.fly
+  if (F) {
+    const target = inputState.jumpHeld && player.position.y < F.maxY ? F.climb : player.grounded ? -2 : F.sink
+    const dv = target - player.velocity.y
+    player.velocity.y += Math.sign(dv) * Math.min(Math.abs(dv), F.accel * dt)
+  } else player.velocity.y += PHYSICS.gravity * dt
   if (player.grounded && !jumped && player.velocity.y < -2) player.velocity.y = -2 // stay pressed to slopes
 
   const desired = { x: player.velocity.x * dt, y: player.velocity.y * dt, z: player.velocity.z * dt }

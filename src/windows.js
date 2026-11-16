@@ -1,9 +1,9 @@
 import './windows.css'
-import { DAILY, GYM, RANKS, SHOP, UPGRADES } from './config.js'
+import { DAILY, GYM, PET_PASSES, RANKS, SHOP, UPGRADES } from './config.js'
 import { ICONS } from './hudIcons.js'
 import { burst, centre } from './juice.js'
 import { createWindow, replay, uiButton } from './uiWindow.js'
-import { buyPass, buyUpgrade, claimDaily, commas, dailyStatus, emit, rankIndex, short, spend, state, upgradeDef } from './stats.js'
+import { buyPass, buyPetPass, buyUpgrade, claimDaily, commas, dailyStatus, emit, rankIndex, short, spend, state, upgradeDef } from './stats.js'
 
 // The menu windows (all on the shared uiWindow shell): Shop (passes, instant blocks, premium
 // gym pads; everything for cash), Upgrades, Ranks, Daily rewards and the free gift reveal.
@@ -20,7 +20,15 @@ function el(tag, cls, html = '') {
 
 export function createWindows({ onBoost, hud, say }) {
   // --- Shop -------------------------------------------------------------------------------------
-  const shop = createWindow({ title: 'Shop', icon: ICONS.shop, className: 'w-shop', onOpen: () => renderShop() })
+  let focus = null // a pass card to scroll to and highlight (openShopAt)
+  const shop = createWindow({ title: 'Shop', icon: ICONS.shop, className: 'w-shop', onOpen: () => renderShop(), onClose: () => (focus = null) })
+  function openShopAt(id) {
+    focus = id
+    shop.open()
+    if (!shop.isOpen()) return
+    renderShop()
+    requestAnimationFrame(() => shop.body.querySelector(`[data-pass="${id}"]`)?.scrollIntoView({ block: 'center' }))
+  }
   function renderShop() {
     const b = shop.body
     b.innerHTML = ''
@@ -46,6 +54,30 @@ export function createWindows({ onBoost, hud, say }) {
       passes.append(card)
     }
     b.append(passes)
+    // Hatching passes (the egg panel's side buttons open the Shop here).
+    b.append(el('div', 'uiw-heading uiw-text w-h', 'Pets'))
+    const petCards = el('div', 'w-cards')
+    for (const p of PET_PASSES) {
+      const owned = !!state.passes[p.id]
+      const card = el('div', `w-card${owned ? ' owned' : ''}${focus === p.id ? ' focus' : ''}`, `<div class="w-ico">${ICONS[p.icon] ?? ICONS.pets}</div><div class="w-name">${p.name}</div><div class="w-desc">${p.desc}</div>`)
+      card.dataset.pass = p.id
+      const btn = uiButton(owned ? 'Owned' : money(p.price), owned ? 'green' : state.cash >= p.price ? 'green' : 'red', () => {
+        const r = buyPetPass(p.id)
+        if (r.need) {
+          replay(btn, 'shake')
+          say(`Need ${money(r.need)} more!`, false)
+        } else if (r.done) {
+          replay(card, 'bump')
+          burst(...centre(card), 'coins')
+          say(`${p.name} unlocked!`, true)
+          renderShop()
+        }
+      }, 'w-buy')
+      btn.disabled = owned
+      card.append(btn)
+      petCards.append(card)
+    }
+    b.append(petCards)
     b.append(el('div', 'uiw-heading uiw-text w-h', 'Instant Blocks'))
     const boosts = el('div', 'w-cards four')
     SHOP.boosts.forEach((bo, i) => {
@@ -198,6 +230,7 @@ export function createWindows({ onBoost, hud, say }) {
   void hud
   return {
     shop,
+    openShopAt,
     upgrades,
     ranks,
     daily,
