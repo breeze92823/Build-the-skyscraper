@@ -495,19 +495,21 @@ export const FINALE = {
 // Building n (0-based) gets taller each time: floors = floorsBase + n * floorsPer (max floorsMax).
 // A floor's size is NOT fixed: it is set ONCE, when the floor starts, so the floor takes about
 // floorMinutes(builders) of the room's real building (backend tower.ts, the server's call; client tower.js in
-// local play, always solo): `soloMins` (2.5) for one builder, soloMins + crowdMins * (1 - 1/N) for N (4 for
-// two, ~5 for five, ~5.5 for a crowd, never over `maxMins`). So a lone player sees a floor go up every 2-3
-// minutes and a crowd works longer on each one. A builder's pace = the blocks they placed over the last
-// `window` s, blended in their first `window` s with one full bag (`trip`) every `tripSecs` s; a builder
-// counts for `active` s after their last placement. Floor = the builders' summed blocks/min x the floor's
-// minutes (never under minBase * minGrowth^n); the minutes ease `rampUp` / `rampDown` of the way toward the
+// local play, always solo): `soloMins` (3.5) for one builder, soloMins + crowdMins * (1 - 1/N) for N (4.75 for
+// two, 5.5 for five, ~6 for a crowd, never over `maxMins`). So a lone player sees a floor go up every 3-4
+// minutes and a crowd works longer on each one. A builder's pace = the blocks they placed over their last
+// `window` s of BUILDING time (breaks over `active` s, like the gym or a celebration, neither count nor reset
+// it), blended until they have built `window` s in all with one full bag (`trip`) every `tripSecs` s; a builder
+// counts for `active` s after their last placement. Floor = max(the builders' summed blocks/min x the floor's
+// minutes, `minBags` x their summed full bags: a high-capacity player always gets a floor sized to their bag,
+// minBase * minGrowth^n). One placement (or boost) fills at most the floor in progress; the minutes ease `rampUp` / `rampDown` of the way toward the
 // new crowd size each floor. A started floor never grows; if the room slows under `shrinkAt` of the pace it
 // was sized for, only its REMAINING part shrinks. The HUD shows the floor as a percentage, never its size.
 // Keep in step with the backend constants.ts.
 // Its look is BUILDINGS[pickBuilding(n)] (tower.js): building 0 is always the first one, every
 // later one is a weighted roll on `chance` (seeded by n, so a reload keeps the same pick),
 // shown by the Next Building reel (nextBuilding.js). `rarity` is a NEXT_BUILDING.rarities key.
-export const BUILDING_SCALE = { floorsBase: 8, floorsPer: 2, floorsMax: 40, soloMins: 2.5, crowdMins: 3, maxMins: 6, rampUp: 0.5, rampDown: 0.75, window: 180, tripSecs: 50, shrinkAt: 0.7, minBase: 30, minGrowth: 1.08, active: 90 }
+export const BUILDING_SCALE = { floorsBase: 8, floorsPer: 2, floorsMax: 40, soloMins: 3.5, crowdMins: 2.5, maxMins: 6, minBags: 4, rampUp: 0.5, rampDown: 0.75, window: 180, tripSecs: 50, shrinkAt: 0.7, minBase: 30, minGrowth: 1.08, active: 90 }
 export const BUILDINGS = [
   { name: 'Crystal Spire', rarity: 'common', chance: 26, shape: 'chamfer', size: 21, glass: '#3fd3e6', frame: '#e9f7ff', slab: '#ffffff', base: '#6b3fd1', crown: 'spire', lobby: { name: 'CRYSTAL LOUNGE', carpet: '#123a36', wall: '#16302c', accent: '#3fd3e6', wood: '#8a5a32', sofa: '#f4f1ea', lights: 'chandelier' } },
   { name: 'Wave Towers', rarity: 'common', chance: 22, shape: 'blob', size: 24, glass: '#3f7ff0', frame: '#dfe9ff', slab: '#f4f7ff', base: '#2b3f8f', crown: 'dome', lobby: { name: 'WAVE LOUNGE', carpet: '#132447', wall: '#1a2a52', accent: '#5f9bff', wood: '#6b4a2e', sofa: '#eef2fb', lights: 'ring' } },
@@ -699,7 +701,9 @@ export const SHOP = {
     { id: 'bag2', name: 'Big Bag', desc: '+50% bag capacity, forever', price: 120000, icon: 'bag' },
   ],
   // Instant blocks straight into the tower (they count for your rank too); priced a little
-  // above the cash those blocks would pay.
+  // above the cash those blocks would pay. Together they fill at most `boostShare` of any one floor (main.js
+  // buyBoost places what still fits and charges only for that), so cash never rushes a building.
+  boostShare: 0.25,
   boosts: [
     { blocks: 1000, price: 1500, color: 'green' },
     { blocks: 5000, price: 7000, color: 'orange' },

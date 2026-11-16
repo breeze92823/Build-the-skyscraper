@@ -69,47 +69,49 @@ export function floorMinutes(builders) {
   const S = BUILDING_SCALE
   return Math.min(S.maxMins, S.soloMins + S.crowdMins * (1 - 1 / Math.max(1, builders)))
 }
-// Blocks a floor of building n needs when its builders place `rate` blocks a minute and it should take `mins`
-// minutes, never under the minimum. Same rule as the backend tower.ts.
-export function floorNeed(n, rate, mins) {
+// Blocks a floor of building n needs when its builders place `rate` blocks a minute, it should take `mins`
+// minutes and their full bags add up to `bags` blocks: never fewer than BUILDING_SCALE.minBags of those bags
+// (a high-capacity player always faces a floor sized to their bag), never under the minimum. Same rule as the
+// backend tower.ts.
+export function floorNeed(n, rate, mins, bags = 0) {
   const S = BUILDING_SCALE
   const min = Math.max(1, Math.round(S.minBase * Math.pow(S.minGrowth, n)))
-  return Math.max(min, Math.round(Math.min(Math.max(0, rate || 0) * Math.max(0, mins), 1e15)))
+  const want = Math.max(Math.max(0, rate || 0) * Math.max(0, mins), S.minBags * Math.max(0, bags || 0))
+  return Math.max(min, Math.round(Math.min(want, 1e15)))
 }
-// Your building pace in blocks a minute (backend tower.ts BuildRate): what you placed over the last
-// BUILDING_SCALE.window s; in your first `window` s of building the rest of the window is one full bag
-// (`trip()`) every `tripSecs` s. Sizes the floors in local play.
+// Your building pace in blocks a minute (backend tower.ts BuildRate): what you placed over your last
+// BUILDING_SCALE.window s of BUILDING time (breaks longer than `active` s, like the gym or a celebration, do
+// not count and do not reset it); until you have built `window` s in all, the rest is one full bag (`trip()`)
+// every `tripSecs` s. Sizes the floors in local play.
 function createBuildRate(trip) {
-  let samples = [] // { at, n } ~1 s buckets
+  let samples = [] // { at, n } ~1 s buckets, `at` in building-time ms
   let sum = 0
-  let first = 0
+  let busy = 0 // building-time ms so far
   let last = -Infinity
-  const trim = (now) => {
-    const since = now - BUILDING_SCALE.window * 1000
+  const trim = (t) => {
+    const since = t - BUILDING_SCALE.window * 1000
     while (samples.length && samples[0].at < since) sum -= samples.shift().n
     if (!samples.length) sum = 0
   }
   return {
     add(blocks, now = performance.now()) {
-      if (now - last > BUILDING_SCALE.active * 1000) {
-        samples = []
-        sum = 0
-        first = now
-      }
-      last = now
+      const gap = now - last
+      if (gap > 0 && gap <= BUILDING_SCALE.active * 1000) busy += gap
+      last = Math.max(last, now)
       if (blocks > 0) {
         const tail = samples[samples.length - 1]
-        if (tail && now - tail.at < 1000) tail.n += blocks
-        else samples.push({ at: now, n: blocks })
+        if (tail && busy - tail.at < 1000) tail.n += blocks
+        else samples.push({ at: busy, n: blocks })
         sum += blocks
       }
-      trim(now)
+      trim(busy)
     },
     perMinute(now = performance.now()) {
       const S = BUILDING_SCALE
-      if (now - last > S.active * 1000) return (Math.max(1, trip() || 0) * 60) / S.tripSecs // idle / not started: your bag
-      trim(now)
-      const span = Math.min(S.window, Math.max(0, (now - first) / 1000))
+      const gap = now - last
+      const t = busy + (gap > 0 && gap <= S.active * 1000 ? gap : 0)
+      trim(t)
+      const span = Math.min(S.window, Math.max(0, t / 1000))
       return (sum * 60) / S.window + (1 - span / S.window) * ((Math.max(1, trip() || 0) * 60) / S.tripSecs)
     },
   }
@@ -139,7 +141,7 @@ export function createTower(scene, saved) {
   let placedAll = 0 // blocks placed on this building (all floors)
   let tripOf = () => 0 // fn(): blocks one full bag of yours places (main.js): your first-guess pace in local play
   const pace = createBuildRate(() => tripOf()) // your blocks a minute: sizes the floors in local play (always solo)
-  const localNeed = (n) => floorNeed(n, pace.perMinute(), BUILDING_SCALE.soloMins)
+  const localNeed = (n) => floorNeed(n, pace.perMinute(), BUILDING_SCALE.soloMins, Math.max(1, tripOf() || 0))
   let phase = 'building' // 'building' | 'celebrate' | 'sinking'
   let phaseTime = 0
   let sink = 0 // m sunk so far
@@ -688,45 +690,40 @@ export function createTower(scene, saved) {
   }
 
   // --- Building logic --------------------------------------------------------------------------------
-  // Adds blocks to the floor in progress; completes floors (and the building). Returns the
+  // Adds blocks to the floor in progress: one call fills AT MOST that floor (the rest is not taken; callers
+  // keep it, e.g. in the bag), so no single placement or instant-block boost rolls through a whole building
+  // (the server caps each `build` the same way). Can complete the floor (and the building). Returns the
   // number of blocks it took (0 once the building is done).
   // `who` = { id, name } of whoever placed them (the finale's Top Builders, `contributors()`).
   function addBlocks(n, who = null) {
     if (shared) return addBlocksShared(n, who)
-    if (phase !== 'building' || n <= 0) return 0
-    let left = n
-    let taken = 0
-    while (left > 0 && phase === 'building') {
-      const room = needNow() - floorBlocks
-      const put = Math.min(room, left)
-      floorBlocks += put
-      placedAll += put
-      left -= put
-      taken += put
-      // Credited before completeFloor: the last block can finish the building, and the
-      // 'complete' listeners read the final tally.
-      if (who && put > 0) {
-        const c = contrib.get(who.id)
-        if (c) c.blocks += put
-        else contrib.set(who.id, { id: who.id, name: who.name, blocks: put })
-      }
-      if (floorBlocks >= needNow()) completeFloor()
+    if (phase !== 'building' || !(n > 0)) return 0
+    const taken = Math.max(0, Math.min(needNow() - floorBlocks, Math.floor(n)))
+    floorBlocks += taken
+    placedAll += taken
+    // Credited before completeFloor: the last block can finish the building, and the
+    // 'complete' listeners read the final tally.
+    if (who && taken > 0) {
+      const c = contrib.get(who.id)
+      if (c) c.blocks += taken
+      else contrib.set(who.id, { id: who.id, name: who.name, blocks: taken })
     }
     pace.add(taken)
+    if (floorBlocks >= needNow()) completeFloor()
     syncBlocks()
     return taken
   }
-  // Shared mode: the number of blocks that still fit in the building (per the latest server state minus
-  // what was reported but is not in it yet; floors not started yet are counted at this floor's size, the
-  // server clamps exactly) goes to the caller for its bag / cash accounting and up to the server; the
-  // DISPLAYED progress changes only when the server's state comes back (~100 ms later).
+  // Shared mode: the number of blocks that still fit in the floor in progress (per the latest server state
+  // minus what was reported but is not in it yet; the server takes at most that floor per `build` too) goes to
+  // the caller for its bag / cash accounting and up to the server; the DISPLAYED progress changes only when
+  // the server's state comes back (~100 ms later), and the next floor takes blocks from then on.
   function addBlocksShared(n, who) {
     if (phase !== 'building' || !(n > 0)) return 0
     const now = performance.now()
     inflight = inflight.filter((e) => now - e.t < INFLIGHT_MS)
     let pending = 0
     for (const e of inflight) pending += e.n
-    const left = needNow() - floorBlocks + Math.max(0, spec.floors - floors - 1) * needNow()
+    const left = needNow() - floorBlocks
     const take = Math.min(Math.floor(n), Math.max(0, Math.floor(left - pending)))
     if (take <= 0) return 0
     inflight.push({ t: now, n: take })
@@ -739,6 +736,17 @@ export function createTower(scene, saved) {
     }
     reporter?.(take)
     return take
+  }
+  // Blocks that still fit in the floor in progress right now (shared: minus what is reported but not in the
+  // server's state yet): the most one placement / boost can take (addBlocks).
+  function roomLeft() {
+    if (phase !== 'building') return 0
+    let pending = 0
+    if (shared) {
+      const now = performance.now()
+      for (const e of inflight) if (now - e.t < INFLIGHT_MS) pending += e.n
+    }
+    return Math.max(0, Math.floor(needNow() - floorBlocks - pending))
   }
   // Who placed blocks on the current building, most first. Shared: the server's top builders (`built`).
   const contributors = () => (shared && builders && spec && builders.n === spec.n ? builders.list.slice() : [...contrib.values()].sort((a, b) => b.blocks - a.blocks))
@@ -1024,6 +1032,7 @@ export function createTower(scene, saved) {
     center: C,
     anchors,
     addBlocks,
+    roomLeft,
     contributors,
     // Shared tower (one per room, the server's): see sync(). `shared` is true while it follows the server.
     get shared() {
