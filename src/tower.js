@@ -1,0 +1,555 @@
+import {
+  BoxGeometry,
+  ConeGeometry,
+  CylinderGeometry,
+  DynamicDrawUsage,
+  Euler,
+  ExtrudeGeometry,
+  Group,
+  InstancedMesh,
+  Matrix4,
+  Mesh,
+  MeshStandardMaterial,
+  Quaternion,
+  Shape,
+  SphereGeometry,
+  TorusGeometry,
+  Vector3,
+} from 'three'
+import { BUILDING_SCALE, BUILDINGS, ELEVATOR, LAYOUT, STAIRS, TOWER } from './config.js'
+import { RAPIER, addFixed, world } from './physics.js'
+import { neon } from './propkit.js'
+import { blockMaterial } from './site.js'
+import { capGeometry, floorGeometry, footprint, offset, pointInPolygon, prismTrimesh, ringGeometry, southEdgeAt, southEdgeMax } from './shapes.js'
+import { mulberry32, paintConcrete, paintWindows, toTexture } from './textures.js'
+
+// The shared skyscraper everyone on the server builds. Building n has a look from
+// BUILDINGS, a number of floors and a block count per floor (BUILDING_SCALE). Finished
+// floors are one InstancedMesh (slab band + curtain-wall glass), the roof is a concrete cap
+// with a glowing green edge, and the floor in progress shows as stone blocks popping onto
+// the roof, filling it from the elevator side outward. Collision: a trimesh prism up to
+// the roof plus an invisible parapet with gaps at the elevator and stair exits.
+// When the last floor is done the crown goes on, the building stands for a while, then
+// sinks into the sand and the next one starts.
+
+export function buildingSpec(n) {
+  const S = BUILDING_SCALE
+  const def = BUILDINGS[n % BUILDINGS.length]
+  const floors = Math.min(S.floorsMax, S.floorsBase + n * S.floorsPer)
+  const perFloor = []
+  let total = 0
+  for (let f = 0; f < floors; f++) {
+    const b = Math.round((S.blocksBase * Math.pow(S.blockGrowth, n) * (1 + f * S.floorGrowth)) / 10) * 10
+    perFloor.push(b)
+    total += b
+  }
+  const size = def.size + Math.min(6, Math.floor(n / BUILDINGS.length) * 2)
+  return { n, def, floors, perFloor, total, size, pts: footprint(def.shape, size) }
+}
+
+const easeOutBack = (t) => {
+  const c = 1.70158
+  const u = t - 1
+  return 1 + (c + 1) * u * u * u + c * u * u
+}
+
+export function createTower(scene, saved) {
+  const C = LAYOUT.tower
+  const group = new Group() // everything that sinks
+  group.name = 'tower'
+  scene.add(group)
+
+  const listeners = { floor: [], complete: [], building: [], height: [] }
+  const emit = (name, data) => listeners[name].forEach((fn) => fn(data))
+
+  // --- Progress ------------------------------------------------------------------------
+  let spec = null
+  let floors = 0 // finished floors
+  let floorBlocks = 0 // blocks in the floor being built
+  let phase = 'building' // 'building' | 'celebrate' | 'sinking'
+  let phaseTime = 0
+  let sink = 0 // m sunk so far
+
+  // --- Shared materials ------------------------------------------------------------------
+  const concreteTex = toTexture(paintConcrete(256, '#b9bcc0', '#8f9399', 626), { srgb: true })
+  const roofMat = new MeshStandardMaterial({ map: concreteTex, roughness: 0.9 })
+  const foundationTop = new MeshStandardMaterial({ map: concreteTex, roughness: 0.9 })
+  const edgeMat = neon('#3bff6e', 2.6)
+  const ghostMat = neon('#7dffa0', 1.6, { transparent: true, opacity: 0.35, depthWrite: false })
+  const blockGeo = new BoxGeometry(TOWER.block, TOWER.block, TOWER.block)
+  blockGeo.translate(0, TOWER.block / 2, 0)
+
+  // Per-building pieces (rebuilt by setBuilding).
+  let floorsMesh = null
+  let slabMat = null
+  let glassMat = null
+  let foundation = null
+  let roof = null
+  let edge = null
+  let blocks = null
+  let crown = null
+  const ghost = new Mesh(new BoxGeometry(TOWER.block * 1.08, TOWER.block * 1.08, TOWER.block * 1.08), ghostMat)
+  ghost.geometry.translate(0, TOWER.block * 0.54, 0)
+  group.add(ghost)
+  let cells = [] // { x, z, m: Matrix4 } local, in fill order
+  let shown = 0 // blocks visible on the roof
+  const popping = [] // { i, t }
+  let rising = null // { t } newest floor growing in
+  const anchors = {}
+
+  // --- Colliders -----------------------------------------------------------------------------
+  let colliders = []
+  function clearColliders() {
+    for (const c of colliders) world.removeCollider(c, false)
+    colliders = []
+  }
+  function buildColliders() {
+    clearColliders()
+    if (phase === 'sinking') return
+    const pts = spec.pts
+    const y = roofY()
+    const fnd = prismTrimesh(offset(pts, 1.6), -0.5, TOWER.foundation, C.x, C.z)
+    colliders.push(addFixed(RAPIER.ColliderDesc.trimesh(fnd.vertices, fnd.indices), { x: 0, y: 0, z: 0 }))
+    if (floors > 0) {
+      const body = prismTrimesh(pts, 0, y, C.x, C.z)
+      colliders.push(addFixed(RAPIER.ColliderDesc.trimesh(body.vertices, body.indices), { x: 0, y: 0, z: 0 }))
+      // Parapet: an invisible wall round the roof edge, open at the exits.
+      const H = 2.4
+      for (let i = 0; i < pts.length; i++) {
+        const [ax, az] = pts[i]
+        const [bx, bz] = pts[(i + 1) % pts.length]
+        const mx = (ax + bx) / 2
+        const mz = (az + bz) / 2
+        if (anchors.exits.some((e) => Math.hypot(mx - e.x, mz - e.z) < e.r)) continue
+        const len = Math.hypot(bx - ax, bz - az)
+        const yaw = Math.atan2(-(bz - az), bx - ax)
+        colliders.push(
+          addFixed(RAPIER.ColliderDesc.cuboid(len / 2 + 0.15, H / 2, 0.15), { x: C.x + mx, y: y + H / 2, z: C.z + mz }, { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }),
+        )
+      }
+    }
+  }
+
+  // --- Building swap ------------------------------------------------------------------------
+  function disposeBuilding() {
+    for (const m of [floorsMesh, foundation, roof, edge, blocks, crown]) {
+      if (!m) continue
+      group.remove(m)
+      m.traverse?.((o) => {
+        if (o.isMesh && o.geometry !== blockGeo) o.geometry.dispose()
+      })
+    }
+    slabMat?.dispose()
+    glassMat?.dispose()
+    glassMat?.map?.dispose()
+    glassMat?.emissiveMap?.dispose()
+    crown = null
+  }
+
+  function computeAnchors() {
+    const pts = spec.pts
+    const half = ELEVATOR.mast * 1.5 + ELEVATOR.cage
+    const x0 = ELEVATOR.centerX - half
+    const x1 = ELEVATOR.centerX + half
+    const wall = southEdgeMax(pts, x0, x1)
+    anchors.cageZ = wall + 0.7 + ELEVATOR.cage / 2
+    anchors.liftX = ELEVATOR.centerX + (ELEVATOR.mast + ELEVATOR.cage) / 2
+    anchors.botX = ELEVATOR.centerX - (ELEVATOR.mast + ELEVATOR.cage) / 2
+    anchors.liftWall = southEdgeAt(pts, anchors.liftX) ?? wall
+    anchors.botWall = southEdgeAt(pts, anchors.botX) ?? wall
+    const sx0 = STAIRS.x0 - STAIRS.landing
+    const sx1 = STAIRS.x0 + STAIRS.flight + STAIRS.landing
+    anchors.stairsZ = southEdgeMax(pts, sx0, sx1) + 0.7 // inner edge of the inner lane
+    anchors.stairsExitX = STAIRS.x0 - STAIRS.landing / 2
+    anchors.stairsWall = southEdgeAt(pts, anchors.stairsExitX) ?? anchors.stairsZ
+    anchors.exits = [
+      { x: anchors.liftX, z: anchors.liftWall, r: ELEVATOR.cage / 2 + 0.4 },
+      { x: anchors.botX, z: anchors.botWall, r: ELEVATOR.cage / 2 + 0.4 },
+      { x: anchors.stairsExitX, z: anchors.stairsWall, r: STAIRS.landing / 2 + 0.6 },
+    ]
+    // The spot on the roof just inside the elevator exit (where the fill starts).
+    anchors.roofEntry = { x: anchors.liftX, z: anchors.liftWall - 2 }
+  }
+
+  function computeCells() {
+    const inner = offset(spec.pts, -1.2)
+    const rand = mulberry32(1000 + spec.n)
+    let minX = Infinity
+    let maxX = -Infinity
+    let minZ = Infinity
+    let maxZ = -Infinity
+    for (const [x, z] of inner) {
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x)
+      minZ = Math.min(minZ, z)
+      maxZ = Math.max(maxZ, z)
+    }
+    const s = TOWER.cell
+    const out = []
+    const h = TOWER.block * 0.45
+    for (let x = minX + s / 2; x <= maxX; x += s) {
+      for (let z = minZ + s / 2; z <= maxZ; z += s) {
+        if (!pointInPolygon(x, z, inner)) continue
+        if (![[-h, -h], [h, -h], [-h, h], [h, h]].every(([dx, dz]) => pointInPolygon(x + dx, z + dz, inner))) continue
+        const d = Math.hypot(x - anchors.roofEntry.x, z - anchors.roofEntry.z) + rand() * 2.2
+        const sy = 0.55 + rand() * 0.45
+        const m = new Matrix4().compose(new Vector3(x, 0, z), new Quaternion().setFromEuler(new Euler((rand() - 0.5) * 0.06, (rand() - 0.5) * 0.3, (rand() - 0.5) * 0.06)), new Vector3(1, sy, 1))
+        out.push({ x, z, d, m, sy })
+      }
+    }
+    out.sort((a, b) => a.d - b.d)
+    cells = out
+  }
+
+  function makeCrown() {
+    const def = spec.def
+    const g = new Group()
+    const frame = new MeshStandardMaterial({ color: def.frame, roughness: 0.4, metalness: 0.3 })
+    const light = neon('#ff3030', 3)
+    if (def.crown === 'spire') {
+      const base = new Mesh(new CylinderGeometry(spec.size * 0.35, spec.size * 0.5, 6, 8), glassMat)
+      base.position.y = 3
+      const cone = new Mesh(new ConeGeometry(spec.size * 0.33, 16, 8), frame)
+      cone.position.y = 14
+      const mast = new Mesh(new CylinderGeometry(0.25, 0.4, 22, 6), frame)
+      mast.position.y = 31
+      const tip = new Mesh(new SphereGeometry(0.7, 10, 8), light)
+      tip.position.y = 42.5
+      tip.name = 'beacon'
+      g.add(base, cone, mast, tip)
+    } else if (def.crown === 'dome') {
+      const dome = new Mesh(new SphereGeometry(spec.size * 0.7, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), glassMat)
+      const ring = new Mesh(new TorusGeometry(spec.size * 0.72, 0.5, 8, 40), frame)
+      ring.rotation.x = Math.PI / 2
+      const mast = new Mesh(new CylinderGeometry(0.2, 0.35, 14, 6), frame)
+      mast.position.y = spec.size * 0.7 + 6
+      const tip = new Mesh(new SphereGeometry(0.6, 10, 8), light)
+      tip.position.y = spec.size * 0.7 + 13.5
+      tip.name = 'beacon'
+      g.add(dome, ring, mast, tip)
+    } else {
+      const halo = new Mesh(new TorusGeometry(spec.size * 0.6, 0.9, 10, 48), neon(def.glass, 3))
+      halo.rotation.x = Math.PI / 2
+      halo.position.y = 8
+      halo.name = 'halo'
+      const posts = new Group()
+      for (let i = 0; i < 6; i++) {
+        const p = new Mesh(new CylinderGeometry(0.4, 0.4, 8, 6), frame)
+        const a = (i / 6) * Math.PI * 2
+        p.position.set(Math.cos(a) * spec.size * 0.6, 4, Math.sin(a) * spec.size * 0.6)
+        posts.add(p)
+      }
+      g.add(halo, posts)
+    }
+    g.traverse((o) => {
+      if (o.isMesh) o.castShadow = true
+    })
+    return g
+  }
+
+  function setBuilding(n, keep = null) {
+    disposeBuilding()
+    spec = buildingSpec(n)
+    floors = keep ? Math.min(keep.floors, spec.floors) : 0
+    floorBlocks = keep ? Math.min(keep.blocks, spec.perFloor[floors] ?? 0) : 0
+    phase = floors >= spec.floors ? 'celebrate' : 'building'
+    phaseTime = 0
+    sink = 0
+    group.position.set(C.x, 0, C.z)
+    const def = spec.def
+
+    const win = paintWindows(def.glass, def.frame, 6, 800 + n)
+    const map = toTexture(win.color, { srgb: true })
+    const emap = toTexture(win.emissive, { srgb: true })
+    map.repeat.set(1 / 9, 1)
+    emap.repeat.copy(map.repeat)
+    glassMat = new MeshStandardMaterial({ map, emissiveMap: emap, emissive: '#ffffff', emissiveIntensity: 0, roughness: 0.12, metalness: 0.35, envMapIntensity: 1.5 })
+    slabMat = new MeshStandardMaterial({ color: def.slab, roughness: 0.5 })
+    const geo = floorGeometry(spec.pts, TOWER.floorHeight, TOWER.slab)
+    floorsMesh = new InstancedMesh(geo, [slabMat, glassMat], spec.floors)
+    floorsMesh.instanceMatrix.setUsage(DynamicDrawUsage)
+    const m = new Matrix4()
+    for (let f = 0; f < spec.floors; f++) floorsMesh.setMatrixAt(f, m.makeTranslation(0, TOWER.foundation + f * TOWER.floorHeight, 0))
+    floorsMesh.count = floors
+    floorsMesh.castShadow = true
+    floorsMesh.receiveShadow = true
+    floorsMesh.frustumCulled = false
+    group.add(floorsMesh)
+
+    // Foundation: a coloured plinth (the building's base band) with a concrete top.
+    const fShape = new Shape(offset(spec.pts, 1.6).map(([x, z]) => ({ x, y: -z })))
+    const fGeo = new ExtrudeGeometry(fShape, { depth: TOWER.foundation + 0.5, bevelEnabled: false })
+    fGeo.rotateX(-Math.PI / 2)
+    fGeo.translate(0, -0.5, 0)
+    foundation = new Mesh(fGeo, [foundationTop, new MeshStandardMaterial({ color: def.base, roughness: 0.35, metalness: 0.2 })])
+    foundation.receiveShadow = true
+    group.add(foundation)
+
+    roof = new Mesh(capGeometry(spec.pts), roofMat)
+    roof.receiveShadow = true
+    group.add(roof)
+    edge = new Mesh(ringGeometry(spec.pts, 0.35), edgeMat)
+    group.add(edge)
+
+    computeAnchors()
+    computeCells()
+    blocks = new InstancedMesh(blockGeo, blockMaterial(), Math.max(1, cells.length))
+    blocks.instanceMatrix.setUsage(DynamicDrawUsage)
+    blocks.castShadow = true
+    blocks.receiveShadow = true
+    blocks.frustumCulled = false
+    cells.forEach((c, i) => blocks.setMatrixAt(i, c.m))
+    blocks.count = 0
+    group.add(blocks)
+    shown = 0
+    popping.length = 0
+    rising = null
+    syncRoof()
+    syncBlocks(true)
+    if (phase !== 'building') {
+      crown = makeCrown()
+      crown.position.y = roofY()
+      group.add(crown)
+    }
+    buildColliders()
+    emit('building', api)
+    emit('height', api)
+  }
+
+  // --- Roof + blocks ------------------------------------------------------------------------------
+  const roofY = () => TOWER.foundation + floors * TOWER.floorHeight
+  function syncRoof() {
+    const y = roofY()
+    roof.position.y = y + 0.02
+    edge.position.y = y + 0.05
+    blocks.position.y = y + 0.02
+    roof.visible = floors > 0
+  }
+  function needNow() {
+    return spec.perFloor[floors] ?? 1
+  }
+  // Number of roof blocks that should show for the current floor.
+  function syncBlocks(instant = false) {
+    const want = phase === 'building' ? Math.min(cells.length, Math.floor((floorBlocks / needNow()) * cells.length)) : 0
+    if (want < shown) {
+      shown = want
+      blocks.count = shown
+      popping.length = 0
+      return
+    }
+    for (let i = shown; i < want; i++) {
+      if (instant) continue
+      popping.push({ i, t: 0 })
+    }
+    shown = want
+    blocks.count = shown
+    if (popping.length > 40) finishPops(popping.length - 40)
+    if (instant) for (let i = 0; i < shown; i++) blocks.setMatrixAt(i, cells[i].m)
+    blocks.instanceMatrix.needsUpdate = true
+  }
+  function finishPops(n) {
+    for (let k = 0; k < n; k++) {
+      const p = popping.shift()
+      blocks.setMatrixAt(p.i, cells[p.i].m)
+    }
+  }
+
+  // --- Building logic --------------------------------------------------------------------------------
+  // Adds blocks to the floor in progress; completes floors (and the building). Returns the
+  // number of blocks it took (0 once the building is done).
+  function addBlocks(n) {
+    if (phase !== 'building' || n <= 0) return 0
+    let left = n
+    let taken = 0
+    while (left > 0 && phase === 'building') {
+      const room = needNow() - floorBlocks
+      const put = Math.min(room, left)
+      floorBlocks += put
+      left -= put
+      taken += put
+      if (floorBlocks >= needNow()) completeFloor()
+    }
+    syncBlocks()
+    return taken
+  }
+
+  function completeFloor() {
+    floors++
+    floorBlocks = 0
+    shown = 0
+    blocks.count = 0
+    popping.length = 0
+    floorsMesh.count = floors
+    rising = { t: 0, f: floors - 1 }
+    syncRoof()
+    const done = floors >= spec.floors
+    if (done) {
+      phase = 'celebrate'
+      phaseTime = 0
+      crown = makeCrown()
+      crown.position.y = roofY()
+      crown.scale.setScalar(0.01)
+      group.add(crown)
+    }
+    buildColliders()
+    emit('floor', { floor: floors, of: spec.floors, done })
+    emit('height', api)
+    if (done) emit('complete', { n: spec.n, name: spec.def.name })
+  }
+
+  // --- Queries ------------------------------------------------------------------------------------
+  const local = (x, z) => [x - C.x, z - C.z]
+  function onRoof(x, y, z) {
+    if (phase === 'sinking') return false
+    const [lx, lz] = local(x, z)
+    return Math.abs(y - roofY()) < 1.6 && pointInPolygon(lx, lz, spec.pts)
+  }
+  // World position of the next block to place (where you need to be within range of).
+  const cursorV = new Vector3()
+  function cursor() {
+    const c = cells[Math.min(shown, cells.length - 1)] ?? { x: anchors.roofEntry.x, z: anchors.roofEntry.z }
+    return cursorV.set(C.x + c.x, roofY(), C.z + c.z)
+  }
+
+  // The closest of the next `n` open cells (the build front) to (x, z), in world space,
+  // with its distance: you build when you are within Build Range of the front, not just of
+  // the single next block (the front moves fast when the crew is busy).
+  const frontV = new Vector3()
+  function nearestFront(x, z, n = 40) {
+    let best = null
+    let bd = Infinity
+    const end = Math.min(cells.length, shown + n)
+    for (let i = shown; i < end; i++) {
+      const c = cells[i]
+      const d = Math.hypot(C.x + c.x - x, C.z + c.z - z)
+      if (d < bd) {
+        bd = d
+        best = c
+      }
+    }
+    if (!best) {
+      const c = cursor()
+      return { pos: frontV.copy(c), d: Math.hypot(c.x - x, c.z - z) }
+    }
+    return { pos: frontV.set(C.x + best.x, roofY(), C.z + best.z), d: bd }
+  }
+
+  const progress = () => {
+    let placed = floorBlocks
+    for (let f = 0; f < floors; f++) placed += spec.perFloor[f]
+    return { placed, total: spec.total, floor: Math.min(floors + 1, spec.floors), floors: spec.floors, floorBlocks, floorNeed: needNow(), done: phase !== 'building' }
+  }
+
+  // --- Frame ----------------------------------------------------------------------------------------
+  const tmpM = new Matrix4()
+  const tmpP = new Vector3()
+  const tmpQ = new Quaternion()
+  const tmpS = new Vector3()
+  function update(dt, elapsed, night) {
+    phaseTime += dt
+    glassMat.emissiveIntensity = night * 1.3
+    // Blocks popping in: drop from above with an overshoot.
+    if (popping.length) {
+      for (let k = popping.length - 1; k >= 0; k--) {
+        const p = popping[k]
+        p.t += dt
+        const c = cells[p.i]
+        const t = Math.min(1, p.t / 0.32)
+        const s = Math.max(0.01, easeOutBack(t))
+        c.m.decompose(tmpP, tmpQ, tmpS)
+        tmpP.y = (1 - t) * 2.2
+        tmpS.set(s, c.sy * s, s)
+        blocks.setMatrixAt(p.i, tmpM.compose(tmpP, tmpQ, tmpS))
+        if (t >= 1) {
+          blocks.setMatrixAt(p.i, c.m)
+          popping.splice(k, 1)
+        }
+      }
+      blocks.instanceMatrix.needsUpdate = true
+    }
+    // The newest floor grows up out of the roof.
+    if (rising) {
+      rising.t += dt
+      const t = Math.min(1, rising.t / 0.55)
+      const s = easeOutBack(t)
+      tmpM.makeScale(1 + (1 - t) * 0.04, Math.max(0.01, s), 1 + (1 - t) * 0.04)
+      tmpM.setPosition(0, TOWER.foundation + rising.f * TOWER.floorHeight, 0)
+      floorsMesh.setMatrixAt(rising.f, tmpM)
+      floorsMesh.instanceMatrix.needsUpdate = true
+      if (t >= 1) rising = null
+    }
+    // Ghost block where the next one goes.
+    const show = phase === 'building'
+    ghost.visible = show
+    if (show) {
+      const c = cells[Math.min(shown, cells.length - 1)]
+      if (c) ghost.position.set(c.x, roofY() + 0.02 + Math.sin(elapsed * 4) * 0.08, c.z)
+      ghost.material.opacity = 0.25 + Math.sin(elapsed * 4) * 0.12
+    }
+    edge.visible = phase === 'building'
+    if (crown) {
+      const t = Math.min(1, phaseTime / 0.8)
+      if (phase === 'celebrate') crown.scale.setScalar(Math.max(0.01, easeOutBack(t)))
+      const beacon = crown.getObjectByName('beacon')
+      if (beacon) beacon.visible = Math.sin(elapsed * 5) > -0.2
+      const halo = crown.getObjectByName('halo')
+      if (halo) halo.rotation.z = elapsed * 0.6
+    }
+    if (phase === 'celebrate' && phaseTime > TOWER.celebrate) {
+      phase = 'sinking'
+      phaseTime = 0
+      clearColliders()
+      emit('height', api)
+    }
+    if (phase === 'sinking') {
+      const height = roofY() + 50
+      const t = Math.min(1, phaseTime / TOWER.sinkTime)
+      sink = height * t * t
+      group.position.y = -sink
+      group.position.x = C.x + Math.sin(elapsed * 40) * 0.15 * (1 - t) // rumble
+      emit('height', api)
+      if (t >= 1) setBuilding(spec.n + 1)
+    }
+  }
+
+  // Visible roof height (sinks with the building) for the elevator, stairs and cranes.
+  const visibleTop = () => (phase === 'sinking' ? Math.max(0, roofY() - sink) : roofY())
+
+  const api = {
+    get spec() {
+      return spec
+    },
+    get floors() {
+      return floors
+    },
+    get phase() {
+      return phase
+    },
+    get roofY() {
+      return roofY()
+    },
+    get visibleTop() {
+      return visibleTop()
+    },
+    get sinking() {
+      return phase === 'sinking'
+    },
+    center: C,
+    anchors,
+    addBlocks,
+    onRoof,
+    cursor,
+    nearestFront,
+    progress,
+    update,
+    on(name, fn) {
+      listeners[name].push(fn)
+    },
+    // Lift anything standing on the roof when a floor completes (callers pass their own).
+    toSave: () => ({ n: spec.n, floors, blocks: floorBlocks }),
+    setBuilding,
+  }
+  const s = saved && Number.isFinite(saved.n) ? saved : null
+  setBuilding(s ? s.n : 0, s)
+  return api
+}
