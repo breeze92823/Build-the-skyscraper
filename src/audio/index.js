@@ -4,12 +4,13 @@
 // updateAudio(dt, state) every frame (jump / land, menu ducking). sfx.<name>() are the
 // shared UI and reward one-shots, game.<name>() the construction sounds. Every button
 // press gets its click here (one capture-phase listener), so menus need no wiring.
-import { installAudio as installCore, isMuted, onStart, setDucked, setMuted, setVolume, toggleMuted, A } from './core.js'
+import { installAudio as installCore, isMuted, onStart, setAdMuted, setDucked, setMuted, setVolume, toggleMuted, A } from './core.js'
 import * as sfx from './sfx.js'
 import * as game from './game.js'
 import * as robot from './robot.js'
+import * as finale from './finale.js'
 
-export { sfx, game, robot, setVolume, setMuted, isMuted, toggleMuted }
+export { sfx, game, robot, finale, setVolume, setMuted, setAdMuted, isMuted, toggleMuted }
 
 function onPress(e) {
   if (e.button > 0) return

@@ -1,0 +1,407 @@
+/* Invite Friends window (invite.js), on the shared dark window frame (.uiw-dark in rewardsUi.css).
+   Lengths are design px x --uiw-u (uiWindow.css), like every window. Buttons keep uiWindow's 44px
+   minimum, so they stay tappable when the window scales down on a phone. */
+.w-invite {
+  --uiw-w: 780;
+  --uiw-h: 640;
+}
+.w-invite .uiw-dialog {
+  height: calc(var(--uiw-h) * var(--uiw-u));
+  display: flex;
+  flex-direction: column;
+}
+.w-invite .uiw-body.inv-body {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+  padding: calc(34 * var(--uiw-u)) calc(22 * var(--uiw-u)) calc(22 * var(--uiw-u));
+  gap: calc(10 * var(--uiw-u));
+}
+/* windows.css makes every window-body child flex: none; the columns take the rest of the height. */
+.w-invite .uiw-body > .inv-cols {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* --- Stats ------------------------------------------------------------------------------- */
+.inv-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.15fr;
+  gap: calc(10 * var(--uiw-u));
+  padding-left: calc(40 * var(--uiw-u));
+}
+.inv-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(74 * var(--uiw-u));
+  padding: calc(4 * var(--uiw-u)) calc(8 * var(--uiw-u));
+  border: max(2px, calc(4 * var(--uiw-u))) solid #1d1a22;
+  border-radius: calc(16 * var(--uiw-u));
+  background: #2a2a2d;
+  text-align: center;
+}
+.inv-v {
+  font-size: calc(36 * var(--uiw-u));
+  line-height: 1;
+  color: #fff;
+  --ow: 3;
+}
+.inv-stat.a .inv-v { color: #7dff6b; }
+.inv-stat.b .inv-v { color: #ffd23a; }
+.inv-stat.c .inv-v { color: #6fe1ff; }
+.inv-l {
+  font-size: calc(21 * var(--uiw-u));
+  line-height: 1.1;
+  color: #d8d8de;
+  --ow: 2.5;
+}
+.inv-hint {
+  font-size: calc(23 * var(--uiw-u));
+  line-height: 1.2;
+  text-align: center;
+  color: #fff;
+  --ow: 3;
+  padding: 0 calc(8 * var(--uiw-u));
+}
+
+/* --- Link row ---------------------------------------------------------------------------- */
+.inv-link {
+  display: flex;
+  gap: calc(10 * var(--uiw-u));
+}
+.inv-link.off {
+  opacity: 0.45;
+}
+.inv-link-in {
+  flex: 1;
+  min-width: 0;
+  height: calc(64 * var(--uiw-u));
+  min-height: 44px;
+  padding: 0 calc(16 * var(--uiw-u));
+  border: max(2px, calc(4 * var(--uiw-u))) solid #1d1a22;
+  border-radius: calc(16 * var(--uiw-u));
+  background: #1f1f22;
+  color: #cfe9ff;
+  font: inherit;
+  font-size: calc(24 * var(--uiw-u));
+  font-weight: 600;
+  user-select: text;
+  -webkit-user-select: text;
+  touch-action: manipulation;
+}
+.inv-copy,
+.inv-share {
+  width: calc(210 * var(--uiw-u));
+  height: calc(64 * var(--uiw-u));
+  font-size: calc(32 * var(--uiw-u));
+}
+.inv-share {
+  width: calc(150 * var(--uiw-u));
+}
+
+/* --- Prize cards (welcome gift + tiers) -------------------------------------------------- */
+.inv-card {
+  --c1: #6fe1ff;
+  --c2: #10a4ec;
+  --ray: rgba(255, 255, 255, 0.18);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: calc(12 * var(--uiw-u));
+  min-height: calc(92 * var(--uiw-u));
+  padding: calc(8 * var(--uiw-u)) calc(12 * var(--uiw-u));
+  border: max(2px, calc(4 * var(--uiw-u))) solid #1d1a22;
+  border-radius: calc(16 * var(--uiw-u));
+  background: radial-gradient(circle at 28% 50%, var(--c1) 0%, var(--c2) 78%);
+  box-shadow: inset 0 0 0 max(1px, calc(3 * var(--uiw-u))) rgba(255, 255, 255, 0.32);
+  color: #fff;
+  flex: none;
+  cursor: pointer;
+}
+.inv-c-blue { --c1: #6fe1ff; --c2: #10a4ec; }
+.inv-c-purple { --c1: #f27bff; --c2: #c21fe6; }
+.inv-c-gold { --c1: #ffe680; --c2: #ffb300; }
+.inv-c-red { --c1: #ff8a9a; --c2: #f0284f; }
+.inv-c-rainbow {
+  background:
+    radial-gradient(circle at 28% 50%, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 55%),
+    linear-gradient(115deg, #ff2bd6 0%, #ff5a5a 22%, #ffc21a 42%, #57e05a 60%, #22c4ff 80%, #9a5cff 100%);
+}
+.inv-rays {
+  position: absolute;
+  inset: -80%;
+  background: repeating-conic-gradient(from 0deg at 28% 50%, var(--ray) 0deg 8deg, transparent 8deg 16deg);
+  pointer-events: none;
+  animation: inv-spin 40s linear infinite;
+}
+@keyframes inv-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .inv-rays { animation: none; }
+}
+.inv-arts {
+  position: relative;
+  display: flex;
+  flex: none;
+  gap: calc(2 * var(--uiw-u));
+  min-width: calc(76 * var(--uiw-u));
+}
+.inv-art {
+  width: calc(70 * var(--uiw-u));
+  height: calc(70 * var(--uiw-u));
+}
+.inv-art svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.inv-card.welcome .inv-art,
+.inv-card.tier .inv-art:nth-child(2) {
+  width: calc(54 * var(--uiw-u));
+  height: calc(54 * var(--uiw-u));
+  align-self: flex-end;
+  margin-left: calc(-14 * var(--uiw-u));
+}
+.inv-info {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(3 * var(--uiw-u));
+}
+.inv-t {
+  font-size: calc(30 * var(--uiw-u));
+  line-height: 1.05;
+  --ow: 3.5;
+}
+.inv-p {
+  font-size: calc(24 * var(--uiw-u));
+  line-height: 1.1;
+  color: #fff7c2;
+  --ow: 3;
+}
+.inv-bar {
+  position: relative;
+  height: calc(20 * var(--uiw-u));
+  border: max(1px, calc(3 * var(--uiw-u))) solid #1d1a22;
+  border-radius: calc(10 * var(--uiw-u));
+  background: rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.inv-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(#7dff6b, #2be04b);
+}
+.inv-bar b {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(15 * var(--uiw-u));
+  line-height: 1;
+  color: #fff;
+  --ow: 2.5;
+}
+.inv-btn {
+  position: relative;
+  flex: none;
+  width: calc(150 * var(--uiw-u));
+  height: calc(60 * var(--uiw-u));
+  font-size: calc(28 * var(--uiw-u));
+}
+.inv-btn.locked,
+.inv-btn.done {
+  filter: saturate(0.6);
+}
+.inv-card.locked {
+  filter: saturate(0.55) brightness(0.82);
+}
+.inv-card.claimed {
+  filter: saturate(0.75) brightness(0.8);
+}
+.inv-card.ready {
+  animation: inv-glow 1.4s ease-in-out infinite;
+}
+@keyframes inv-glow {
+  50% { box-shadow: inset 0 0 0 max(1px, calc(3 * var(--uiw-u))) rgba(255, 255, 255, 0.32), 0 0 calc(18 * var(--uiw-u)) rgba(125, 255, 107, 0.85); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .inv-card.ready { animation: none; }
+}
+
+/* --- Columns: friends | rewards ----------------------------------------------------------- */
+.inv-cols {
+  display: grid;
+  grid-template-columns: 0.74fr 1.4fr;
+  grid-template-rows: minmax(0, 1fr);
+  gap: calc(12 * var(--uiw-u));
+}
+.inv-box {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(6 * var(--uiw-u));
+  padding: calc(10 * var(--uiw-u));
+  border: max(2px, calc(4 * var(--uiw-u))) solid #1d1a22;
+  border-radius: calc(18 * var(--uiw-u));
+  background: #2a2a2d;
+}
+.inv-head {
+  flex: none;
+  text-align: center;
+  font-size: calc(28 * var(--uiw-u));
+  line-height: 1.1;
+  color: #ffd23a;
+  --ow: 3.5;
+}
+.inv-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(8 * var(--uiw-u));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  padding: calc(2 * var(--uiw-u));
+  scrollbar-width: thin;
+}
+.inv-empty {
+  padding: calc(16 * var(--uiw-u)) calc(8 * var(--uiw-u));
+  text-align: center;
+  font-size: calc(24 * var(--uiw-u));
+  line-height: 1.2;
+  color: #e6e6ea;
+  --ow: 3;
+}
+
+/* --- Friends rows ---------------------------------------------------------------------------- */
+.inv-friend {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: calc(8 * var(--uiw-u));
+  min-height: calc(66 * var(--uiw-u));
+  padding: calc(6 * var(--uiw-u));
+  border: max(1px, calc(3 * var(--uiw-u))) solid #1d1a22;
+  border-radius: calc(14 * var(--uiw-u));
+  background: #38383c;
+}
+.inv-friend.offline,
+.inv-friend.away {
+  opacity: 0.75;
+}
+.inv-pfp {
+  position: relative;
+  flex: none;
+  width: calc(46 * var(--uiw-u));
+  height: calc(46 * var(--uiw-u));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #6a6a72;
+  font-size: calc(26 * var(--uiw-u));
+  color: #fff;
+  --ow: 3;
+}
+.inv-pfp img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.inv-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.inv-name .n {
+  font-size: calc(25 * var(--uiw-u));
+  line-height: 1.1;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  --ow: 3;
+}
+.inv-name .s {
+  font-size: calc(19 * var(--uiw-u));
+  line-height: 1.1;
+  color: #9fe7a0;
+  --ow: 2.5;
+}
+.inv-friend.offline .s,
+.inv-friend.away .s {
+  color: #c8c8d0;
+}
+.inv-friend .inv-btn {
+  width: calc(112 * var(--uiw-u));
+  height: calc(50 * var(--uiw-u));
+  font-size: calc(22 * var(--uiw-u));
+}
+
+/* --- Portrait phones: a narrower, taller window with the lists stacked (rewards first), so the
+   text stays readable when the window scales down to the screen width. ------------------------ */
+@media (orientation: portrait) and (max-width: 700px) {
+  .w-invite {
+    --uiw-w: 580;
+    --uiw-h: 1200;
+  }
+  .inv-stats {
+    padding-left: calc(30 * var(--uiw-u));
+  }
+  .inv-cols {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1.7fr) minmax(0, 1fr);
+  }
+  .inv-box.tiers {
+    order: -1;
+  }
+  .inv-copy {
+    width: calc(180 * var(--uiw-u));
+  }
+  .inv-share {
+    width: calc(130 * var(--uiw-u));
+  }
+}
+
+/* --- Short screens (landscape phones): the 44px tap targets would squeeze the lists to nothing, so the
+   whole window body scrolls instead and the lists take their natural height. --------------------- */
+@media (max-height: 520px) {
+  /* Height limits the scale here, so a wider and shorter window is free: more text per line. */
+  .w-invite {
+    --uiw-w: 1000;
+    --uiw-h: 560;
+  }
+  .w-invite .uiw-body.inv-body {
+    overflow-y: auto;
+    touch-action: pan-y;
+    overscroll-behavior: contain;
+  }
+  .w-invite .uiw-body > .inv-cols {
+    flex: none;
+    grid-template-rows: auto;
+    align-items: start;
+  }
+  .inv-box {
+    min-height: auto;
+  }
+  .inv-list {
+    flex: none;
+    overflow: visible;
+    touch-action: auto;
+  }
+}

@@ -70,8 +70,26 @@ export function createHud() {
   sStr.root.querySelector('.hs-body').append(capBar)
   const capFill = capBar.firstChild
   const sBuild = stat(ICONS.tower, 'buildings')
-  const sCrew = stat(ICONS.crew, 'crew')
-  left.append(event, sCash.root, sSpeed.root, sStr.root, sBuild.root, sCrew.root)
+  // Running timed boosts (reward prizes): icon, multiplier, time left.
+  const timed = el('div', 'hud-timed')
+  left.append(event, sCash.root, sSpeed.root, sStr.root, sBuild.root, timed)
+  const TIMED_ICON = { cash: ICONS.cash, strength: ICONS.strength, speed: ICONS.speed }
+  let timedKey = ''
+  function drawTimed(list = []) {
+    // Whole seconds only, so the DOM changes at most once a second.
+    const key = list.map((b) => `${b.stat}${b.mult}${b.active ? 'a' : 'w'}:${Math.ceil(b.left)}`).join('|')
+    if (key === timedKey) return
+    const same = list.length && timedKey.split('|').length === list.length && timedKey.split('|').every((k, i) => k.split(':')[0] === `${list[i].stat}${list[i].mult}${list[i].active ? 'a' : 'w'}`)
+    timedKey = key
+    if (!same) {
+      // A boost waiting behind a bigger one of the same stat is dimmed (its time does not run yet).
+      timed.innerHTML = list.map((b) => `<div class="ht-chip ${b.stat}${b.active ? '' : ' wait'}"><span class="ht-ico">${TIMED_ICON[b.stat] ?? ICONS.cash}</span><b class="hud-txt">x${b.mult}</b><span class="ht-t hud-txt"></span></div>`).join('')
+    }
+    list.forEach((b, i) => {
+      const t = timed.children[i]?.querySelector('.ht-t')
+      if (t) t.textContent = clock(b.left)
+    })
+  }
 
   // --- Right: rank card + buttons ---------------------------------------------------------------------
   const right = el('div', 'hud-right')
@@ -173,11 +191,13 @@ export function createHud() {
       actions.set(name, fn)
     },
     setReserved,
-    // s: { cash, speed, walk, strength, bag, cap, buildings, crew, crewCount, rankIdx, totalBlocks,
+    // s: { cash, speed, walk, strength, bag, cap, buildings, rankIdx, totalBlocks,
     //      tower: { placed, total, floor, floors, name, done }, event: { name, color, left, length } | null,
-    //      nextEvent, passes, giftIn, dailyReady, eta, muted, spins }
+    //      nextEvent, passes, freeReady, dailyReady, timed: [{ stat, mult, left }], eta, muted, spins, combo, comboMax }
     update(dt, s) {
       setText('cash', sCash.val, `$${short(s.cash)}`)
+      // Coin Combo: shown under the cash while it is active.
+      setText('combo', sCash.sub, s.combo > 1.005 ? `Combo x${s.combo.toFixed(2)}${s.combo >= s.comboMax - 0.005 ? ' MAX' : ''}` : '')
       setText('speed', sSpeed.val, short(s.speed))
       setText('walk', sSpeed.sub, `Walk Speed: ${Math.round(s.walk * 3.6)}`)
       setText('str', sStr.val, short(s.strength))
@@ -186,13 +206,12 @@ export function createHud() {
       capBar.classList.toggle('full', s.bag >= s.cap)
       setText('bld', sBuild.val, commas(s.buildings))
       setText('bldsub', sBuild.sub, 'Buildings finished')
-      setText('crew', sCrew.val, `+${Math.round(s.crew * 100)}%`)
-      setText('crewsub', sCrew.sub, s.crewCount ? `Crew: ${s.crewCount} (+10% each)` : 'Add crew: +10% each')
       // Tower.
       const t = s.tower
       // Open (finished) building: the bar counts down the time left to go inside.
       const inside = t.openLeft != null
-      setText('bar', barText, inside ? `${INSIDE.mult}X INSIDE  ${clock(t.openLeft)}` : t.done ? 'BUILDING COMPLETE!' : `${commas(t.placed)} / ${commas(t.total)}`)
+      // Sinking: the Next Building reel is picking the next one.
+      setText('bar', barText, inside ? `${INSIDE.mult}X INSIDE  ${clock(t.openLeft)}` : t.next ? 'NEXT BUILDING...' : t.done ? 'BUILDING COMPLETE!' : `${commas(t.placed)} / ${commas(t.total)}`)
       setStyle('barw', barFill, 'width', inside ? '100%' : `${((t.placed / Math.max(1, t.total)) * 100).toFixed(2)}%`)
       bar.classList.toggle('inside', inside)
       setText('sub', sub, inside ? `${t.name}  ·  Complete` : `${t.name}  ·  Floor ${t.floor}/${t.floors}`)
@@ -234,11 +253,11 @@ export function createHud() {
       // Buttons.
       bSpeed.classList.toggle('owned', !!s.passes.spd2)
       bStr.classList.toggle('owned', !!s.passes.str2)
-      const giftReady = s.giftIn <= 0
-      setText('gift', bGift.querySelector('.hb-label'), giftReady ? 'FREE' : clock(s.giftIn))
-      bGift.classList.toggle('ready', giftReady)
+      // FREE: the Free Reward (glows until it is claimed). DAILY: a daily or playtime reward waits.
+      bGift.classList.toggle('ready', !!s.freeReady)
       bDaily.querySelector('.hb-badge').hidden = !s.dailyReady
-      bGift.querySelector('.hb-badge').hidden = !giftReady
+      bGift.querySelector('.hb-badge').hidden = true
+      drawTimed(s.timed)
       spinBadge.hidden = !s.spins
       setText('spins', spinBadge, s.spins > 99 ? '99+' : String(s.spins ?? 0))
       if (last.muted !== s.muted) {

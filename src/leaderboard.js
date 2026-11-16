@@ -6,8 +6,9 @@ import { buildDefaultCharacter } from './avatar/character.js'
 import { short } from './stats.js'
 
 // The leaderboard wall south of the plaza: six boards (Most Strength, Speed, Blocks, Cash,
-// Buildings, Playtime) listing everyone on the server, redrawn every few seconds, and a
-// podium in front with gold / silver / bronze statues of the top three builders.
+// Buildings, Playtime) redrawn every few seconds, and a podium in front with gold / silver / bronze
+// statues of the top three builders. Each board lists the server's top saved players (net.js hands
+// them to setRemote) and you (your live numbers), sorted; without a server it is just you.
 
 const BOARDS = [
   { key: 'strength', title: 'Most Strength', color: '#ff9a3b' },
@@ -151,17 +152,32 @@ export function createLeaderboard(scene) {
   }
 
   let since = 99
+  let remote = null // the server's `leaderboard` boards: { blocks: [{ name, value }], ... }
+
+  // One board's rows: the server's players (minus anyone we have live numbers for: you),
+  // the live entries, best first.
+  function rowsFor(key, entries) {
+    const live = new Set(entries.map((e) => e.name))
+    const rows = entries.map((e) => ({ name: e.name, [key]: e[key] }))
+    for (const r of remote?.[key] ?? []) {
+      if (typeof r?.name === 'string' && Number.isFinite(r.value) && !live.has(r.name)) rows.push({ name: r.name, [key]: r.value })
+    }
+    return rows.sort((a, b) => b[key] - a[key]).slice(0, 10)
+  }
+
   return {
+    // The server's boards arrived: redraw at once.
+    setRemote(data) {
+      remote = data?.boards && typeof data.boards === 'object' ? data.boards : null
+      since = 99
+    },
     // entries: [{ name, strength, speed, blocks, cash, buildings, playtime }]
     update(dt, entries, youName) {
       since += dt
       if (since < 4) return
       since = 0
-      for (const p of panels) {
-        const rows = entries.slice().sort((a, b) => b[p.key] - a[p.key])
-        drawPanel(p, rows, youName)
-      }
-      const top = entries.slice().sort((a, b) => b.blocks - a.blocks)
+      for (const p of panels) drawPanel(p, rowsFor(p.key, entries), youName)
+      const top = rowsFor('blocks', entries)
       statues.forEach((s, i) => {
         const e = top[i]
         const text = e ? e.name : '---'

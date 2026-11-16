@@ -244,7 +244,6 @@
   font-size: max(10px, calc(19 * var(--u)));
   -webkit-text-stroke-width: max(2px, calc(4 * var(--u)));
 }
-.hud-stat.crew .hs-val { color: #7dff6b; font-size: max(15px, calc(34 * var(--u))); }
 .hs-cap {
   width: calc(160 * var(--u));
   min-width: 70px;
@@ -708,3 +707,33 @@
 @media (max-height: 520px) {
   .hud-notice { top: 42%; }
 }
+
+/* Running timed boosts (reward prizes) under the stats: icon, x mult, time left. */
+.hud-timed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(6 * var(--u));
+}
+.hud-timed:empty { display: none; }
+.ht-chip {
+  display: flex;
+  align-items: center;
+  gap: calc(6 * var(--u));
+  padding: calc(3 * var(--u)) calc(12 * var(--u)) calc(3 * var(--u)) calc(4 * var(--u));
+  border: max(2px, calc(3 * var(--u))) solid #1b1b24;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(20, 20, 26, 0.85), rgba(20, 20, 26, 0.6));
+  animation: ht-in 0.35s cubic-bezier(0.3, 1.6, 0.5, 1);
+}
+.ht-chip.cash { border-color: #2fb34f; }
+.ht-chip.strength { border-color: #ffb02e; }
+.ht-chip.speed { border-color: #3fb6ff; }
+.ht-ico { width: max(20px, calc(34 * var(--u))); height: max(20px, calc(34 * var(--u))); flex: none; }
+.ht-ico svg { width: 100%; height: 100%; display: block; }
+.ht-chip b { font-size: max(13px, calc(26 * var(--u))); color: #ffe066; }
+.ht-t { font-size: max(12px, calc(22 * var(--u))); color: #fff; font-variant-numeric: tabular-nums; }
+@keyframes ht-in {
+  from { transform: scale(0.5); opacity: 0; }
+}
+.ht-chip.wait { opacity: 0.55; filter: saturate(0.4); }

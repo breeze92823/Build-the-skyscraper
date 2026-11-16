@@ -1,0 +1,138 @@
+/* "While You Were Away..." popup (offlineUi.js), on the shared window shell (uiWindow.css): a purple card with a
+   cream frame, no title tab and no X (it is modal: CLAIM closes it). Lengths are design px x --uiw-u, measured
+   off the 1920x991 reference; the button keeps uiWindow's 44px minimum so it stays tappable on a phone. */
+.w-away {
+  --uiw-w: 620;
+  --uiw-h: 530;
+}
+.w-away .uiw-title,
+.w-away .uiw-close {
+  display: none;
+}
+.w-away .uiw-dialog {
+  background: linear-gradient(#7a3df0 0%, #6a35e0 48%, #4d25bd 52%, #3f1fa6 100%);
+  border-color: #1d1a22;
+  box-shadow:
+    inset 0 0 0 max(2px, calc(8 * var(--uiw-u))) #f1dcb0,
+    inset 0 0 0 max(3px, calc(11 * var(--uiw-u))) #1d1a22,
+    0 calc(12 * var(--uiw-u)) calc(34 * var(--uiw-u)) rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.w-away .uiw-body {
+  align-items: center;
+  padding: calc(34 * var(--uiw-u));
+  gap: calc(6 * var(--uiw-u));
+  position: relative;
+  overflow: hidden; /* the light rays reach past the frame */
+  max-height: none;
+}
+/* Soft light rays behind the two cards. */
+.w-away .uiw-body::before {
+  content: '';
+  position: absolute;
+  left: -20%;
+  right: -20%;
+  top: 14%;
+  height: 56%;
+  background: repeating-conic-gradient(from 0deg at 50% 50%, rgba(255, 255, 255, 0.11) 0deg 8deg, transparent 8deg 16deg);
+  -webkit-mask-image: radial-gradient(closest-side, #000 25%, transparent 100%);
+  mask-image: radial-gradient(closest-side, #000 25%, transparent 100%);
+  pointer-events: none;
+}
+.w-away .uiw-body > * {
+  position: relative;
+}
+
+.away-title {
+  font-size: calc(46 * var(--uiw-u));
+  line-height: 1.05;
+  text-align: center;
+  color: #ffb423;
+  --ow: 4;
+  --oc: #4a1d00;
+}
+.away-time {
+  font-size: calc(27 * var(--uiw-u));
+  color: #fff;
+  --ow: 3;
+}
+
+.away-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(20 * var(--uiw-u));
+  width: 100%;
+  margin: calc(12 * var(--uiw-u)) 0 calc(18 * var(--uiw-u));
+}
+.away-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(2 * var(--uiw-u));
+  min-width: 0;
+}
+.away-icon {
+  width: calc(170 * var(--uiw-u));
+  height: calc(170 * var(--uiw-u));
+  filter: drop-shadow(0 calc(6 * var(--uiw-u)) calc(8 * var(--uiw-u)) rgba(0, 0, 0, 0.35));
+  animation: away-float 2.4s ease-in-out infinite;
+}
+.away-speed .away-icon {
+  animation-delay: -1.2s;
+}
+.away-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+@keyframes away-float {
+  50% {
+    transform: translateY(calc(-8 * var(--uiw-u))) rotate(-2deg);
+  }
+}
+.away-gain {
+  font-size: calc(48 * var(--uiw-u));
+  line-height: 1;
+  color: #fff;
+  --ow: 5;
+  background: rgba(20, 8, 60, 0.45);
+  border-radius: calc(14 * var(--uiw-u));
+  padding: calc(2 * var(--uiw-u)) calc(14 * var(--uiw-u)) calc(4 * var(--uiw-u));
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.away-label {
+  font-size: calc(25 * var(--uiw-u));
+  line-height: 1.1;
+  color: #fff;
+  --ow: 3;
+  margin-top: calc(4 * var(--uiw-u));
+}
+.away-sub {
+  font-size: calc(21 * var(--uiw-u));
+  line-height: 1.15;
+  text-align: center;
+  color: #d4ff4a;
+  --ow: 2.5;
+  white-space: nowrap;
+}
+.away-arrow {
+  margin: 0 calc(5 * var(--uiw-u));
+}
+
+/* The green CLAIM button, wider than the shared 266px one. */
+.away-claim.uiw-btn {
+  width: calc(340 * var(--uiw-u));
+  height: calc(82 * var(--uiw-u));
+}
+.away-claim.uiw-btn:disabled {
+  filter: saturate(0.6);
+  cursor: progress;
+}
+@media (prefers-reduced-motion: reduce) {
+  .away-icon {
+    animation: none;
+  }
+}

@@ -15,6 +15,7 @@ import {
   RepeatWrapping,
   RingGeometry,
   SRGBColorSpace,
+  SphereGeometry,
   TorusGeometry,
   Vector2,
   Vector3,
@@ -349,7 +350,32 @@ function kiosk(root, statics, { x, z, color, title, icon }) {
   const lbl = label(title, 1.6, { color: '#ffffff', colors: null, outline: '#1b0f3a', outlineWidth: 18 })
   lbl.position.set(x, 8.7, z - 1.4)
   root.add(lbl)
-  return { icon: iconGroup, ring, pad: { x, z: z + 2.4 } }
+  // A "CLAIM!" tag over the sign while something is waiting there (setReady; the Invite Friends kiosk).
+  const tag = label('CLAIM!', 1.0, { color: '#7dff6b', colors: null, outline: '#06260c', outlineWidth: 16 })
+  tag.position.set(x, 10.6, z - 1.4)
+  tag.visible = false
+  root.add(tag)
+  return { icon: iconGroup, ring, pad: { x, z: z + 2.4 }, tag, ready: false }
+}
+
+// Two figures and a plus: bring friends.
+function inviteIcon() {
+  const g = new Group()
+  const m = neon('#3bff7a', 2.4)
+  for (const [x, s] of [[-0.75, 0.85], [0.75, 1]]) {
+    const head = new Mesh(new SphereGeometry(0.42 * s, 14, 10), m)
+    head.position.set(x, 0.75 * s, 0)
+    const body = new Mesh(new CylinderGeometry(0.28 * s, 0.7 * s, 1.2 * s, 10), m)
+    body.position.set(x, -0.3 * s, 0)
+    g.add(head, body)
+  }
+  const plus = new Group()
+  const bar = new Mesh(new BoxGeometry(0.9, 0.22, 0.22), neon('#ffd23a', 2.4))
+  const bar2 = new Mesh(new BoxGeometry(0.22, 0.9, 0.22), neon('#ffd23a', 2.4))
+  plus.add(bar, bar2)
+  plus.position.set(0, 1.55, 0)
+  g.add(plus)
+  return g
 }
 
 function upgradeIcon() {
@@ -391,18 +417,26 @@ export function buildSite(scene, lighting) {
   const drums = buildProps(statics, dynamic)
   const upgrades = kiosk(root, statics, { ...LAYOUT.upgrades, color: '#8f3dff', title: 'UPGRADES', icon: upgradeIcon() })
   const shop = kiosk(root, statics, { ...LAYOUT.shop, color: '#ff3d8f', title: 'SHOP', icon: shopIcon() })
+  const invite = kiosk(root, statics, { ...LAYOUT.invite, color: '#1fb85a', title: 'INVITE FRIENDS', icon: inviteIcon() })
   root.add(bake(statics, true))
   root.add(dynamic)
   scene.add(root)
   return {
     bulb,
-    kiosks: { upgrades, shop },
+    kiosks: { upgrades, shop, invite },
+    // The "CLAIM!" tag over a kiosk's sign (something is waiting there): on / off.
+    setReady(k, on) {
+      k.ready = !!on
+      k.tag.visible = k.ready
+    },
     update(dt, elapsed) {
       for (const d of drums) d.rotateY(dt * 1.6)
-      for (const k of [upgrades, shop]) {
+      for (const k of [upgrades, shop, invite]) {
         k.icon.rotation.y = elapsed * 1.2
         k.icon.position.y = 6.3 + Math.sin(elapsed * 2) * 0.25
-        k.ring.scale.setScalar(1 + Math.sin(elapsed * 3) * 0.04)
+        // A ready kiosk's ring pulses harder and its tag bobs.
+        k.ring.scale.setScalar(1 + Math.sin(elapsed * (k.ready ? 7 : 3)) * (k.ready ? 0.12 : 0.04))
+        if (k.ready) k.tag.position.y = 10.6 + Math.sin(elapsed * 4) * 0.25
       }
     },
   }

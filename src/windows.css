@@ -149,6 +149,75 @@
   color: #8a3dff;
 }
 
+/* Upgrade rows: tinted per upgrade, icon with its level badge underneath, "now » next" line. */
+.w-cashbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: calc(8 * var(--uiw-u));
+  font-size: max(16px, calc(38 * var(--uiw-u)));
+  color: #1aa33a;
+}
+.w-cashbar .w-ico {
+  width: calc(44 * var(--uiw-u));
+  height: calc(44 * var(--uiw-u));
+}
+.w-uico {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: none;
+}
+.w-lv {
+  font-size: max(11px, calc(22 * var(--uiw-u)));
+  line-height: 1;
+  margin-top: calc(2 * var(--uiw-u));
+}
+.w-row .w-name {
+  font-size: max(15px, calc(34 * var(--uiw-u)));
+  color: #fff;
+}
+.w-row .w-lv {
+  color: #fff;
+}
+.w-row .w-desc {
+  color: #1d2230;
+}
+.w-row .w-val {
+  font-size: max(12px, calc(26 * var(--uiw-u)));
+  color: #fff;
+}
+.w-row .w-val b {
+  color: #ffe94a;
+}
+.w-row .w-arrow {
+  color: #fff;
+}
+.up-blue { background: linear-gradient(#7fc6ff, #4d9bff); }
+.up-green { background: linear-gradient(#9af0a4, #5fd774); }
+.up-cyan { background: linear-gradient(#8ef0ff, #4fd0f5); }
+.up-yellow { background: linear-gradient(#ffe56b, #ffc21a); }
+.up-orange { background: linear-gradient(#ffb066, #ff8a2a); }
+.uiw-btn.grey {
+  --btn-lip: #4a4f5a;
+  background: linear-gradient(#9aa0ab, #7d838f 45%, #6c727e);
+}
+.uiw-btn.w-buy {
+  flex-direction: row;
+}
+.w-buy .w-cashico {
+  width: 1em;
+  height: 1em;
+  margin-right: 0.25em;
+  display: inline-block;
+  vertical-align: -0.12em;
+}
+.w-buy .w-cashico svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 /* Ranks: a dark list like a construction-site board. */
 .w-ranks .uiw-dialog {
   background: #3a2c22;

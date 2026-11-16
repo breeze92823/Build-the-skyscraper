@@ -1,5 +1,6 @@
 import {
   AdditiveBlending,
+  Bone,
   BufferAttribute,
   ConeGeometry,
   CylinderGeometry,
@@ -17,7 +18,8 @@ import {
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { boxGeo, neon } from './propkit.js'
-import { makeMixerTruck, mats } from './props.js'
+import { mats } from './props.js'
+import { ROBOT_GEAR } from './config.js'
 
 // Robot Gear models, all procedural:
 //  - wearGear(root, id): armour fixed to an avatar's bones (player, the display mannequins in the
@@ -28,7 +30,7 @@ import { makeMixerTruck, mats } from './props.js'
 //    body. finalize() then merges every static mesh of a bone into one mesh per material family
 //    (vertex coloured), so a full suit is a few dozen draw calls. Animated bits (robotic arms,
 //    claws, the mixer drum, thruster flames) are marked `live` and stay separate.
-//  - makeVehicle(kind): the transformers' other form (mixer truck, big rig, jet), in metres.
+//  - the transformers' vehicles live in vehicles.js (built with `kit`).
 //  - makeDropship(): the red dropship that delivers Titan Armor; makePod(): its armour pod.
 
 // --- Materials + geometry (shared) ----------------------------------------------------------------
@@ -212,7 +214,7 @@ function fist(g, p, s, f, fx, grey = p.mid) {
   marker(g, 0, -0.6 * f, 0.6 * f, fx.fists)
 }
 
-function head(g, p, style) {
+function head(g, p, style, fx) {
   if (style === 'titan') {
     rb(g, 2.0, 2.0, 2.05, p.main, 0, 0, 0, 0, 0, 0, 0.45)
     rb(g, 1.55, 1.3, 0.18, p.trim, 0, -0.15, 1.0)
@@ -226,6 +228,13 @@ function head(g, p, style) {
   }
   rb(g, 2.15, 1.95, 2.15, p.main, 0, 0, 0, 0, 0, 0, 0.4)
   rb(g, 1.8, 0.5, 0.14, lit(p.glow, 2.8), 0, 0.15, 1.07, 0, 0, 0, 0.05)
+  // A bright scanner light sweeping across the visor.
+  const scan = new Group()
+  scan.userData.live = true
+  scan.position.set(0, 0.15, 1.15)
+  g.add(scan)
+  mesh(scan, rbGeo(0.28, 0.44, 0.05, 0.04), lit('#ffffff', 3.4), 0, 0, 0, 0, 0, 0, false)
+  fx.scanners.push(scan)
   rb(g, 1.4, 0.38, 0.16, p.dark, 0, -0.6, 1.05)
   if (style === 'mech') rb(g, 2.22, 0.38, 2.22, p.hazardHead ?? mats.hazard(), 0, 0.98, 0, 0, 0, 0, 0.08)
   else rb(g, 0.36, 0.42, 1.9, p.trim, 0, 1.0, -0.05)
@@ -265,6 +274,15 @@ function suit(p, fx, o = {}) {
     rb(g, 2.7, 2.3, 1.0, p.main, 0, 0.1, -1.5)
     rb(g, 2.1, 1.6, 0.2, p.dark, 0, 0.1, -2.02)
     for (let i = 0; i < 4; i++) bx(g, 1.5, 0.1, 0.08, p.mid, 0, -0.35 + i * 0.25, -2.14)
+    // Status LEDs on the back that chase, and rivets on the chest plate.
+    const leds = new Group()
+    leds.userData.live = true
+    g.add(leds)
+    for (let i = 0; i < 5; i++) {
+      const led = mesh(leds, rbGeo(0.2, 0.14, 0.06, 0.03), lit(i % 2 ? p.glow : '#7dff6b', 3.2), -0.6 + i * 0.3, 0.75, -2.16, 0, 0, 0, false)
+      fx.leds.push(led)
+    }
+    for (const [x, y] of [[-1.15, 0.92], [1.15, 0.92], [-1.15, -0.22], [1.15, -0.22]]) cy(g, 0.08, 0.08, 0.08, chrome(), x, y, 1.28, Math.PI / 2, 0, 0, 8)
     for (const s of SIDES) {
       cy(g, 0.24, 0.28, 1.2, p.mid, s * 0.8, 1.55, -1.5, 0, 0, 0, 12)
       cy(g, 0.3, 0.3, 0.12, p.dark, s * 0.8, 2.15, -1.5, 0, 0, 0, 12)
@@ -278,7 +296,7 @@ function suit(p, fx, o = {}) {
     }
     if (o.back) o.back(g)
   })
-  if (o.head) add(BONES.head, [0, 5.65, 0], (g) => head(g, p, o.head))
+  if (o.head) add(BONES.head, [0, 5.65, 0], (g) => head(g, p, o.head, fx))
   const f = o.fist ?? 1.1
   for (const s of SIDES) {
     add(BONES.upper(s), [s * 2.15, 4.8, 0], (g) => {
@@ -300,8 +318,9 @@ function suit(p, fx, o = {}) {
       cy(g, 0.3, 0.3, 0.76, p.mid, 0, 0, 0, 0, 0, Math.PI / 2, 12)
     })
     add(BONES.upper(s), [s * 2.0, 3.95, 0], (g) => {
-      rb(g, 1.4, 1.1, 1.4, p.mid)
-      cy(g, 0.12, 0.12, 1.0, chrome(), s * 0.75, 0, -0.35, 0, 0, 0, 8)
+      rb(g, 1.6, 1.35, 1.9, p.mid, 0, 0, 0, 0, 0, 0, 0.3)
+      rb(g, 1.66, 0.22, 1.96, p.dark, 0, -0.45, 0)
+      cy(g, 0.12, 0.12, 1.0, chrome(), s * 0.86, 0, -0.5, 0, 0, 0, 8)
     })
     add(BONES.lower(s), [s * 2.0, 3.55, -0.05], (g) => {
       cy(g, 0.66, 0.66, 1.6, p.dark, 0, 0, 0, 0, 0, Math.PI / 2, 18)
@@ -327,14 +346,21 @@ function suit(p, fx, o = {}) {
       rb(g, 1.0, 0.16, 0.08, lit(p.glow, 2.4), 0, 0.15, 0.94, 0, 0, 0, 0.03)
     })
     add(BONES.shin(s), [s * 0.75, 1.18, 0.1], (g) => {
-      cy(g, 0.62, 0.62, 0.5, mats.tyre(), s * 0.98, 0, 0, 0, 0, Math.PI / 2, 18)
-      cy(g, 0.32, 0.32, 0.56, p.mid, s * 0.98, 0, 0, 0, 0, Math.PI / 2, 12)
+      const wh = new Group()
+      wh.userData.live = true
+      wh.position.set(s * 0.98, 0, 0)
+      g.add(wh)
+      cy(wh, 0.62, 0.62, 0.5, mats.tyre(), 0, 0, 0, 0, 0, Math.PI / 2, 18)
+      cy(wh, 0.34, 0.34, 0.56, p.mid, 0, 0, 0, 0, 0, Math.PI / 2, 12)
+      for (let k = 0; k < 3; k++) bx(wh, 0.6, 0.1, 0.12, p.dark, s * 0.28, 0, 0, (k / 3) * Math.PI, 0, 0)
+      fx.wheels.push(wh)
       rb(g, 1.15, 0.8, 0.42, p.main, 0, 0, 0.88)
     })
     add(BONES.shin(s), [s * 0.75, 0.75, 0], (g) => {
-      rb(g, 1.45, 0.85, 1.1, p.main, 0, 0, 0.35)
-      for (const dx of [-0.35, 0.35]) cy(g, 0.14, 0.14, 1.1, chrome(), dx, 0, -0.38, 0, 0, 0, 8)
-      rb(g, 0.12, 0.55, 0.07, lit(p.glow, 2.4), 0, 0, 0.93, 0, 0, 0, 0.03)
+      rb(g, 1.5, 0.95, 1.85, p.mid, 0, 0, 0)
+      rb(g, 1.56, 0.9, 0.9, p.main, 0, 0, 0.5)
+      for (const dx of [-0.4, 0.4]) cy(g, 0.15, 0.15, 1.1, chrome(), dx, 0, -0.98, 0, 0, 0, 8)
+      rb(g, 0.12, 0.55, 0.07, lit(p.glow, 2.4), 0, 0, 0.97, 0, 0, 0, 0.03)
     })
     add(BONES.shin(s), [s * 0.75, 0.36, 0.35], (g) => {
       rb(g, 1.95, 0.55, 2.9, p.main, 0, 0, 0, 0, 0, 0, 0.22)
@@ -353,50 +379,58 @@ function suit(p, fx, o = {}) {
 }
 
 // --- Robotic arms ------------------------------------------------------------------------------------------
-const ARM_L = 0.58
-function armGeos() {
+const ARM_L = 0.62
+const ARM_SCALE = 1.25 // the chains on top of the 1.6x back unit: 2x in all
+// Spider Arms are bigger: the dome at 1.6x and its legs 1.875x on top (3x the base chain).
+const SPIDER_UNIT = 1.6
+const SPIDER_CHAIN = 1.875
+// theme 'spider': all white with light grey joints (Spider Arms).
+function armGeos(theme = 'arms') {
+  const spider = theme === 'spider'
   const white = '#f4f6f8'
-  const black = '#22252c'
-  const yellow = '#ffc21a'
-  const grey = '#8f97a3'
+  const black = spider ? '#b9c0ca' : '#22252c'
+  const yellow = spider ? '#eef1f5' : '#ffc21a'
+  const grey = spider ? '#c9ced6' : '#8f97a3'
+  const fing = spider ? ['#d7dce3', '#9aa2ad'] : ['#3a3e47', '#2a2d34']
   return {
-    seg: coloured('armSeg', [
-      [cylGeo(0.2, 0.2, 0.42, 12), white, 0, 0.31, 0],
-      [cylGeo(0.245, 0.245, 0.14, 12), black, 0, 0.04, 0],
-      [cylGeo(0.215, 0.215, 0.05, 12), black, 0, 0.54, 0],
+    seg: coloured(`${theme}Seg`, [
+      [cylGeo(0.27, 0.27, 0.44, 12), white, 0, 0.33, 0],
+      [cylGeo(0.32, 0.32, 0.15, 12), black, 0, 0.04, 0],
+      [cylGeo(0.29, 0.29, 0.05, 12), black, 0, 0.58, 0],
     ]),
-    housing: coloured('armHousing', [
-      [rbGeo(0.66, 0.56, 0.66, 0.14), yellow, 0, 0.3, 0],
-      [cylGeo(0.16, 0.16, 0.72, 12), grey, 0, 0.3, 0, 0, 0, Math.PI / 2],
-      [cylGeo(0.09, 0.09, 0.76, 8), black, 0, 0.3, 0, 0, 0, Math.PI / 2],
+    housing: coloured(`${theme}Housing`, [
+      [rbGeo(0.84, 0.66, 0.84, 0.18), yellow, 0, 0.32, 0],
+      [cylGeo(0.2, 0.2, 0.9, 12), grey, 0, 0.32, 0, 0, 0, Math.PI / 2],
+      [cylGeo(0.11, 0.11, 0.94, 8), black, 0, 0.32, 0, 0, 0, Math.PI / 2],
     ]),
-    wrist: coloured('armWrist', [
-      [cylGeo(0.26, 0.24, 0.38, 14), yellow, 0, 0.19, 0],
-      [cylGeo(0.3, 0.3, 0.1, 14), grey, 0, 0.4, 0],
-      [cylGeo(0.34, 0.3, 0.12, 14), black, 0, 0.5, 0],
+    wrist: coloured(`${theme}Wrist`, [
+      [cylGeo(0.34, 0.3, 0.44, 14), yellow, 0, 0.22, 0],
+      [cylGeo(0.38, 0.38, 0.12, 14), grey, 0, 0.47, 0],
+      [cylGeo(0.42, 0.38, 0.14, 14), black, 0, 0.58, 0],
     ]),
-    finger: coloured('armFinger', [
-      [rbGeo(0.18, 0.4, 0.22, 0.05), '#3a3e47', 0, 0.2, 0],
-      [cylGeo(0.06, 0.1, 0.42, 8), '#2a2d34', 0, 0.58, 0.04, 0.35],
+    finger: coloured(`${theme}Finger`, [
+      [rbGeo(0.24, 0.5, 0.28, 0.06), fing[0], 0, 0.25, 0],
+      [cylGeo(0.06, 0.13, 0.55, 8), fing[1], 0, 0.74, 0.06, 0.35],
     ]),
   }
 }
-function roboArm(g, p, side, upper, fx, x, y, z) {
-  const G = armGeos()
+function roboArm(g, p, side, upper, fx, x, y, z, opts = {}) {
+  const G = armGeos(opts.theme)
   const mat = familyMat('gloss')
   const yaw = new Group()
   yaw.userData.live = true
   yaw.position.set(x, y, z)
-  yaw.rotation.y = Math.atan2(side, upper ? 0.85 : -0.75)
+  yaw.rotation.y = opts.yaw ?? Math.atan2(side, upper ? 0.85 : -0.75)
+  yaw.scale.setScalar(opts.chainScale ?? ARM_SCALE)
   g.add(yaw)
-  const N = upper ? 14 : 12
+  const N = upper ? 17 : 12
   const joints = []
   let parent = yaw
   for (let i = 0; i < N; i++) {
     const j = new Group()
     if (i > 0) j.position.y = ARM_L
     parent.add(j)
-    mesh(j, i === 6 ? G.housing : G.seg, mat, 0, 0, 0, 0, 0, 0)
+    mesh(j, i === (upper ? 8 : 6) ? G.housing : G.seg, mat, 0, 0, 0, 0, 0, 0)
     joints.push(j)
     parent = j
   }
@@ -410,13 +444,13 @@ function roboArm(g, p, side, upper, fx, x, y, z) {
     around.rotation.y = (k / 3) * Math.PI * 2
     wrist.add(around)
     const f = new Group()
-    f.position.set(0, 0.52, 0.18)
+    f.position.set(0, 0.6, 0.24)
     around.add(f)
     mesh(f, G.finger, mat, 0, 0, 0, 0, 0, 0, false)
     fingers.push(f)
   }
-  marker(wrist, 0, 0.9, 0, fx.claws)
-  fx.arms.push({ yaw, joints, fingers, side, upper, phase: (side > 0) === upper ? 0 : Math.PI })
+  marker(wrist, 0, 1.15, 0, fx.claws)
+  fx.arms.push({ yaw, joints, fingers, side, upper, phase: opts.phase ?? ((side > 0) === upper ? 0 : Math.PI), spider: opts.theme === 'spider', yawBase: yaw.rotation.y, climbYaw: opts.climbYaw ?? 0, climbLift: opts.climbLift ?? 1.2 })
 }
 
 // --- Gear builds --------------------------------------------------------------------------------------------
@@ -424,6 +458,7 @@ const PAL = {
   jetboots: { main: paint('#ffbf1f'), dark: paint('#2a2d35', 0.3, 0.55), mid: paint('#a3aab4', 0.55, 0.32), trim: mats.hazard(), glow: '#2fe6ff' },
   gauntlets: { main: paint('#ffc21a'), dark: paint('#2a2d35', 0.3, 0.55), mid: paint('#a8afb9', 0.5, 0.32), trim: mats.hazard(), glow: '#2fe6ff' },
   arms: { main: paint('#ffc21a'), dark: paint('#23262d', 0.3, 0.5), mid: paint('#8f97a3', 0.6, 0.3), trim: mats.hazard(), glow: '#2fe6ff' },
+  spider: { main: paint('#f2f4f7', 0.15, 0.3), dark: paint('#9aa2ad', 0.4, 0.35), mid: paint('#c9ced6', 0.5, 0.3), trim: paint('#ff3a4a'), glow: '#ff3a4a' },
   mech: { main: paint('#ffbe1a'), dark: paint('#2a2d35', 0.3, 0.55), mid: paint('#a6adb7', 0.55, 0.32), trim: mats.hazard(), glow: '#2fe6ff' },
   blackmech: { main: paint('#24262d', 0.45, 0.32), dark: paint('#121318', 0.3, 0.5), mid: paint('#5d6470', 0.6, 0.3), trim: paint('#ffc21a'), glow: '#2fe6ff', hazardHead: paint('#ffc21a') },
   titan: { main: paint('#d4202d', 0.4, 0.3), dark: paint('#3a0d12', 0.3, 0.45), mid: paint('#ffb21f', 0.5, 0.3), trim: paint('#ffb21f', 0.5, 0.3), glow: '#8ff6ff' },
@@ -435,25 +470,28 @@ const PAL = {
 function gearParts(id, fx) {
   const p = PAL[id]
   const parts = []
-  const add = (bones, at, build) => parts.push({ bones, at, build })
+  const add = (bones, at, build, size = 1) => parts.push({ bones, at, build, size })
   const hide = { pack: true }
   switch (id) {
+    // The add-on gear is built about 2x the body's size (the limb sits inside it); `add`'s last
+    // argument scales the part around its anchor ([x, y, z] where the width must stay narrower).
     case 'jetboots':
       hide.pack = false
       for (const s of SIDES) {
-        add(BONES.shin(s), [s * 0.72, 0.98, 0.05], (g) => {
+        add(BONES.shin(s), [s * 1.12, 2.0, 0.1], (g) => {
           rb(g, 1.58, 1.25, 1.78, p.main, 0, 0, 0, 0, 0, 0, 0.3)
           rb(g, 1.64, 0.28, 1.84, p.trim, 0, 0.5, 0)
           lens(g, 0, -0.08, 0.92, 0.3, p, 'z')
           rb(g, 0.2, 0.9, 1.2, p.dark, s * 0.82, 0, 0)
           rb(g, 0.08, 0.6, 0.08, lit(p.glow, 2.6), s * 0.94, 0, 0.35, 0, 0, 0, 0.02)
-        })
-        add(BONES.shin(s), [s * 0.72, 0.34, 0.25], (g) => {
+        }, [1.4, 1.8, 1.8])
+        add(BONES.shin(s), [s * 1.3, 0.98, 0.5], (g) => {
           rb(g, 1.82, 0.64, 2.58, p.main, 0, 0, 0, 0, 0, 0, 0.24)
           rb(g, 1.92, 0.24, 2.68, p.dark, 0, -0.35, 0)
           for (let i = 0; i < 5; i++) bx(g, 1.98, 0.1, 0.22, p.dark, 0, -0.45, -1.0 + i * 0.5)
           rb(g, 1.62, 0.32, 0.52, p.dark, 0, 0.12, 1.15, -0.3)
           rb(g, 0.5, 0.12, 0.07, lit(p.glow, 2.8), 0, 0.14, 1.38, 0, 0, 0, 0.03)
+          for (const [x, z] of [[-0.6, 0.6], [0.6, 0.6], [-0.6, -0.6], [0.6, -0.6]]) cy(g, 0.07, 0.07, 0.06, chrome(), x, 0.33, z, 0, 0, 0, 8)
           // Heel thruster + two ankle jets.
           cy(g, 0.36, 0.52, 0.62, p.mid, 0, -0.12, -1.35, 0, 0, 0, 14)
           cy(g, 0.54, 0.54, 0.12, p.dark, 0, -0.45, -1.35, 0, 0, 0, 14)
@@ -463,18 +501,18 @@ function gearParts(id, fx) {
             fx.flames.push(flame(g, k * 0.98, -0.22, -0.55, 0.38))
           }
           marker(g, 0, -0.4, 0, fx.feet)
-        })
+        }, [1.4, 2, 2])
       }
       break
     case 'gauntlets':
       hide.pack = false
       for (const s of SIDES) {
-        add(BONES.lower(s), [s * 2.0, 3.72, 0], (g) => {
-          rb(g, 1.55, 0.5, 1.65, p.dark)
-          cy(g, 0.5, 0.5, 1.7, p.dark, 0, 0, 0, 0, 0, Math.PI / 2, 16)
-          cy(g, 0.26, 0.26, 1.76, p.mid, 0, 0, 0, 0, 0, Math.PI / 2, 12)
-        })
-        add(BONES.lower(s), [s * 2.0, 2.85, 0.05], (g) => {
+        add(BONES.upper(s), [s * 2.35, 4.75, 0], (g) => {
+          rb(g, 1.7, 0.9, 1.9, p.main, 0, 0, 0, 0, 0, 0, 0.3)
+          rb(g, 1.76, 0.2, 1.96, p.trim, 0, -0.42, 0)
+          rb(g, 0.12, 0.14, 1.3, lit(p.glow, 2.6), s * 0.86, 0.1, 0, 0, 0, 0, 0.04)
+        }, 1.5)
+        add(BONES.lower(s), [s * 2.75, 3.15, 0.15], (g) => {
           rb(g, 2.15, 1.95, 2.25, p.main, 0, 0, 0, 0, 0, 0, 0.4)
           rb(g, 2.2, 0.36, 2.3, p.trim, 0, 0.84, 0)
           lens(g, 0, -0.05, 1.15, 0.44, p, 'z')
@@ -482,25 +520,56 @@ function gearParts(id, fx) {
           rb(g, 1.5, 0.18, 1.5, p.dark, 0, -0.98, 0)
           for (let i = 0; i < 4; i++) cy(g, 0.17, 0.17, 1.9, p.mid, 0, -1.02, -0.75 + i * 0.5, 0, 0, Math.PI / 2, 10) // rollers
           rb(g, 0.08, 1.2, 0.08, lit(p.glow, 2.6), -s * 1.1, 0, 0.6, 0, 0, 0, 0.02)
-        })
-        add(BONES.lower(s), [s * 2.0, 1.55, 0.3], (g) => fist(g, p, s, 1.32, fx))
+          for (const [x, y] of [[-0.8, 0.55], [0.8, 0.55], [-0.8, -0.6], [0.8, -0.6]]) cy(g, 0.07, 0.07, 0.06, chrome(), x, y, 1.13, Math.PI / 2, 0, 0, 8)
+          cy(g, 0.13, 0.13, 1.6, chrome(), s * 0.6, 1.2, -0.7, 0.2, 0, 0, 8) // hydraulic ram to the shoulder
+        }, [1.55, 1.75, 1.75])
+        add(BONES.lower(s), [s * 2.75, 2.55, 0.65], (g) => fist(g, p, s, 1.32, fx), 1.55)
       }
       break
     case 'arms':
-      add(BONES.torso, [0, 3.95, -1.7], (g) => {
+      add(BONES.torso, [0, 4.35, -2.45], (g) => {
         rb(g, 2.5, 2.7, 1.4, p.main, 0, 0, 0, 0, 0, 0, 0.4)
         rb(g, 1.75, 1.75, 0.22, p.dark, 0, 0, -0.72, 0, 0, 0, 0.2)
         lens(g, 0, 0, -0.86, 0.55, p, 'z-')
+        for (let i = 0; i < 3; i++) bx(g, 1.6, 0.08, 0.06, p.dark, 0, 1.05 - i * 0.12, -0.72)
         for (const s of SIDES) {
           rb(g, 0.36, 2.3, 1.2, p.dark, s * 1.26, 0, 0)
-          rb(g, 0.48, 0.28, 1.6, p.dark, s * 0.8, 1.2, 0.95) // straps
-          rb(g, 0.48, 0.28, 1.6, p.dark, s * 0.8, -1.0, 0.95)
+          rb(g, 0.3, 0.2, 0.9, p.dark, s * 0.75, 1.0, 0.95) // harness
           mesh(g, sphereGeo(0.42), p.dark, s * 1.05, 1.1, -0.25, 0, 0, 0)
           mesh(g, sphereGeo(0.42), p.dark, s * 1.2, -0.95, -0.25, 0, 0, 0)
+          for (const y of [0.6, -0.4]) cy(g, 0.07, 0.07, 0.06, chrome(), s * 0.9, y, -0.73, Math.PI / 2, 0, 0, 8)
           roboArm(g, p, s, true, fx, s * 1.05, 1.15, -0.25)
           roboArm(g, p, s, false, fx, s * 1.2, -0.95, -0.25)
         }
-      })
+      }, 1.6)
+      break
+    case 'spider':
+      // A white dome on the back with eight spider legs arching out all round to the ground.
+      add(BONES.torso, [0, 4.5, -2.35], (g) => {
+        const dome = mesh(g, sphereGeo(1.25), p.main, 0, 0, 0, 0, 0, 0)
+        dome.scale.set(1.05, 1.1, 0.85)
+        rb(g, 2.2, 0.5, 1.6, p.dark, 0, -1.05, 0.2, 0, 0, 0, 0.2)
+        cy(g, 1.1, 1.1, 0.16, lit(p.glow, 3), 0, 0, -1.02, Math.PI / 2, 0, 0, 24)
+        lens(g, 0, 0, -1.12, 0.62, p, 'z-')
+        for (const s of SIDES) rb(g, 0.3, 0.2, 1.0, p.dark, s * 0.75, 0.9, 1.0)
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2 + Math.PI / 8
+          const x = Math.sin(a) * 1.05
+          const zz = Math.cos(a) * 0.8
+          mesh(g, sphereGeo(0.36), p.dark, x, 0.75, zz, 0, 0, 0)
+          // On a wall the legs swing out sideways (a little toward the wall) and fan from up to down.
+          const right = a <= Math.PI
+          const rank = Math.round(((right ? a : Math.PI * 2 - a) - Math.PI / 8) / (Math.PI / 4))
+          roboArm(g, p, x >= 0 ? 1 : -1, true, fx, x, 0.75, zz, {
+            yaw: a,
+            theme: 'spider',
+            phase: (i % 2) * Math.PI,
+            climbYaw: (right ? 1 : -1) * (Math.PI / 2 - 0.17),
+            chainScale: SPIDER_CHAIN,
+            climbLift: [0.45, 1.05, 1.7, 2.15][rank],
+          })
+        }
+      }, SPIDER_UNIT)
       break
     case 'mech':
       parts.push(...suit(p, fx, { head: 'mech', fist: 1.2 }))
@@ -589,13 +658,90 @@ function gearParts(id, fx) {
   return { parts, hide }
 }
 
+// One Spider Arms leg. Walking (ctx.climb 0) the legs arch out and down to the ground, carrying the
+// body, and step in two alternating groups (a leg lifts and reaches while the others hold); on a wall
+// (ctx.climb 1) they swing into the wall's plane, fan from up to down and claw upward the same way.
+// ctx.step is the gait phase (rad), ctx.moving whether the gait runs.
+function spiderLeg(a, t, ctx) {
+  const climb = ctx.climb ?? 0
+  const ph = (ctx.step ?? 0) + a.phase
+  const swing = ctx.moving ? Math.max(0, Math.sin(ph)) : 0
+  const breathe = Math.sin(t * 1.6 + a.phase) * 0.03
+  a.yaw.rotation.y = a.yawBase + (a.climbYaw - a.yawBase) * climb
+  const walkLift = -0.15 + swing * 0.45 + breathe
+  const climbLift = a.climbLift - swing * 0.4 + breathe
+  const lift = walkLift + (climbLift - walkLift) * climb
+  const n = a.joints.length
+  a.joints.forEach((j, i) => {
+    if (i === 0) {
+      j.rotation.x = lift
+      return
+    }
+    const walkBend = i <= 5 ? 0.53 - swing * 0.08 : 0
+    const climbBend = i < n - 3 ? 0.035 : 0.28
+    j.rotation.x = walkBend + (climbBend - walkBend) * climb
+    j.rotation.z = Math.sin(t * 1.3 + i * 0.4 + a.phase) * 0.015
+  })
+  const grip = swing > 0.2 ? 0.95 : 0.25 + 0.05 * Math.sin(t * 3 + a.phase)
+  for (const f of a.fingers) f.rotation.x += (grip - f.rotation.x) * 0.35
+}
+
+// A bare copy of an avatar's skeleton in its bind pose (the giant suits' frame). pairs: [src, copy].
+function makeProxy(root) {
+  const rest = root.userData.restPose
+  const proxy = new Group()
+  proxy.name = 'gearGiant'
+  proxy.nodes = {}
+  const pairs = []
+  const hasBone = (o) => {
+    let found = false
+    o.traverse((x) => (found ||= x.isBone))
+    return found
+  }
+  const walk = (src, dst) => {
+    for (const c of src.children) {
+      if (!c.isBone) {
+        // A plain node above the skeleton (player.glb's 'character'): copy its transform.
+        if (c.isMesh || !hasBone(c)) continue
+        const n = new Group()
+        n.position.copy(c.position)
+        n.quaternion.copy(c.quaternion)
+        n.scale.copy(c.scale)
+        dst.add(n)
+        walk(c, n)
+        continue
+      }
+      const b = new Bone()
+      b.name = c.name
+      b.position.copy(c.position)
+      b.quaternion.copy(rest?.get(c) ?? c.quaternion)
+      dst.add(b)
+      proxy.nodes[c.name] = b
+      pairs.push([c, b])
+      walk(c, b)
+    }
+  }
+  walk(root, proxy)
+  return { proxy, pairs }
+}
+
+// Shared building kit for vehicles.js.
+export const kit = { once, paint, familyMat, lit, flameMat, chrome, glass, cylGeo, sphereGeo, rbGeo, mesh, bx, rb, cy, marker, flame, coloured, mergeStatic, SIDES }
+
 // Dresses `root` (an avatar with `nodes`) in a gear piece. Returns
 // { id, assemble(k), landed(), finalize(), update(dt, ctx), setVisible(on), remove(), points }.
 // assemble(k): 0 = every part away from the body, 1 = all in place (each part lands in turn).
 // finalize(): merge the static meshes (call once assembled). `merge` does both straight away.
 export function wearGear(root, id, { merge = false } = {}) {
-  const fx = { flames: [], arms: [], spin: [], fists: [], feet: [], claws: [] }
+  const fx = { flames: [], arms: [], spin: [], fists: [], feet: [], claws: [], leds: [], scanners: [], wheels: [] }
   const { parts, hide } = gearParts(id, fx)
+  // Full suits are a 2x giant robot: a copy of the avatar's skeleton, `size` times bigger, that
+  // mirrors its bones every frame (with a little lag, so it moves like a heavy machine). The avatar
+  // pilots it from inside, hidden; the armour is fixed to the copy.
+  const G = ROBOT_GEAR.find((g) => g.id === id)?.size ?? 1
+  const giant = G > 1 ? makeProxy(root) : null
+  const owner = root
+  if (giant) root = giant.proxy
   const placed = []
   const holders = new Map()
   const hasHelmet = parts.some((pt) => pt.bones === BONES.head)
@@ -627,6 +773,8 @@ export function wearGear(root, id, { merge = false } = {}) {
     }
     const sub = new Group()
     sub.position.set(...pt.at)
+    if (Array.isArray(pt.size)) sub.scale.set(...pt.size)
+    else sub.scale.setScalar(pt.size ?? 1)
     const inner = new Group()
     sub.add(inner)
     pt.build(inner)
@@ -641,19 +789,46 @@ export function wearGear(root, id, { merge = false } = {}) {
   for (const [bone, q] of posed) bone.quaternion.copy(q)
   // Torso first, then shoulders/arms, then legs, helmet last.
   placed.forEach((pl, i) => (pl.delay = (i / Math.max(1, placed.length)) * 0.55))
-  const hat = root.getObjectByName('hardHat')
-  const vest = root.getObjectByName('workVest')
-  const pack = root.getObjectByName('workPack')
-  if (hasHelmet && hat) hat.visible = false
-  if (hasChest && vest) vest.visible = false
-  if (hide.pack && pack) pack.visible = false
+  const hat = owner.getObjectByName('hardHat')
+  const vest = owner.getObjectByName('workVest')
+  const pack = owner.getObjectByName('workPack')
+  // Inside a giant suit the avatar is hidden; add-on gear hides only what it covers.
+  const hiddenMeshes = []
+  let piloted = !!giant
+  const setPilot = (on) => {
+    if (on) {
+      owner.traverse((o) => {
+        if (o.isMesh && o.visible) {
+          o.visible = false
+          hiddenMeshes.push(o)
+        }
+      })
+    } else {
+      for (const o of hiddenMeshes) o.visible = true
+      hiddenMeshes.length = 0
+    }
+  }
+  if (giant) setPilot(true)
+  else {
+    if (hasHelmet && hat) hat.visible = false
+    if (hasChest && vest) vest.visible = false
+    if (hide.pack && pack) pack.visible = false
+  }
   let landedNow = 0
   let merged = false
+  let shown = true
   const ease = (t) => 1 - Math.pow(1 - t, 3)
   const api = {
     id,
     count: placed.length,
     points: fx,
+    size: G,
+    // false = a giant suit steps aside (gym machine): the avatar shows, the suit hides.
+    setPiloted(on) {
+      if (!giant || on === piloted) return
+      piloted = on
+      setPilot(on)
+    },
     assemble(k) {
       if (merged) return
       for (const pl of placed) {
@@ -682,6 +857,19 @@ export function wearGear(root, id, { merge = false } = {}) {
     // ctx: { t, thrust 0..1, building, speed m/s, step (walk phase, rad) }
     update(dt, ctx) {
       const t = ctx.t
+      if (giant) {
+        const px = giant.proxy
+        if (owner.parent && px.parent !== owner.parent) owner.parent.add(px)
+        px.position.set(owner.position.x, owner.position.y * G, owner.position.z)
+        px.quaternion.copy(owner.quaternion)
+        px.scale.copy(owner.scale).multiplyScalar(G)
+        px.visible = owner.visible && piloted && shown
+        const k = Math.min(1, dt * 11)
+        for (const [src, dst] of giant.pairs) dst.quaternion.slerp(src.quaternion, k)
+      }
+      for (let i = 0; i < fx.leds.length; i++) fx.leds[i].visible = Math.floor(t * 7 + i) % fx.leds.length < 2
+      for (const sc of fx.scanners) sc.position.x = Math.sin(t * 2.4) * 0.66
+      for (const w of fx.wheels) w.rotation.x += (ctx.speed ?? 0) * dt * 1.4
       for (const f of fx.flames) {
         const on = ctx.thrust > 0.04
         f.visible = on
@@ -694,18 +882,22 @@ export function wearGear(root, id, { merge = false } = {}) {
       for (const d of fx.spin) d.rotateY(dt * 2.2)
       const walking = (ctx.speed ?? 0) > 1 && !ctx.building
       for (const a of fx.arms) {
+        if (a.spider) {
+          spiderLeg(a, t, ctx)
+          continue
+        }
         const step = walking ? Math.max(0, Math.sin((ctx.step ?? 0) + a.phase)) : 0
         const breathe = Math.sin(t * 1.6 + a.phase) * 0.03
         const reach = ctx.building && a.upper
-        const lift = reach ? 0.95 + Math.sin(t * 5 + a.phase) * 0.12 : (a.upper ? 0.12 : 0.55) + step * 0.3 + breathe
+        const lift = reach ? 0.85 + Math.sin(t * 5 + a.phase) * 0.12 : (a.upper ? -0.08 : 0.55) + step * 0.3 + breathe
         a.joints.forEach((j, i) => {
           if (i === 0) {
             j.rotation.x = lift
             return
           }
-          const arch = a.upper ? 6 : 5
-          let bend = i <= arch ? (a.upper ? 0.4 : 0.43) : 0.03
-          if (reach) bend = i <= arch ? 0.14 : 0.06
+          const arch = a.upper ? 8 : 5
+          let bend = i <= arch ? (a.upper ? 0.33 : 0.43) : 0.025
+          if (reach) bend = i <= arch ? 0.11 : 0.05
           j.rotation.x = bend + (i <= arch ? step * 0.04 - breathe * 0.5 : 0)
           j.rotation.z = Math.sin(t * 1.3 + i * 0.4 + a.phase) * 0.02
         })
@@ -714,10 +906,14 @@ export function wearGear(root, id, { merge = false } = {}) {
       }
     },
     setVisible(on) {
+      shown = on
       for (const h of holders.values()) h.visible = on
+      if (giant) giant.proxy.visible = on && piloted
     },
     remove() {
       for (const h of holders.values()) h.parent?.remove(h)
+      giant?.proxy.parent?.remove(giant.proxy)
+      setPilot(false)
       if (hat) hat.visible = true
       if (vest) vest.visible = true
       if (pack) pack.visible = true
@@ -725,111 +921,6 @@ export function wearGear(root, id, { merge = false } = {}) {
   }
   if (merge) api.finalize()
   return api
-}
-
-// --- Vehicles (metres, base at y = 0, front +Z) -----------------------------------------------------------
-function wheel(g, x, y, z, r = 0.6, w = 0.45) {
-  cy(g, r, r, w, mats.tyre(), x, y, z, 0, 0, Math.PI / 2, 16)
-  cy(g, r * 0.55, r * 0.55, w + 0.04, chrome(), x, y, z, 0, 0, Math.PI / 2, 10)
-}
-
-function makeBigRig() {
-  const g = new Group()
-  const body = paint('#7a3dd1', 0.45, 0.32)
-  const dark = paint('#24202e', 0.4, 0.5)
-  bx(g, 2.3, 0.5, 9.0, dark, 0, 0.85, -0.6) // chassis
-  bx(g, 2.4, 1.5, 2.8, body, 0, 1.85, 3.1) // hood
-  bx(g, 2.6, 2.6, 2.3, body, 0, 2.55, 0.85) // cab
-  bx(g, 2.6, 3.0, 1.8, body, 0, 2.75, -1.2) // sleeper
-  bx(g, 2.5, 0.6, 2.8, body, 0, 4.4, -0.4, -0.12) // roof fairing
-  bx(g, 2.2, 1.0, 0.08, glass(), 0, 3.15, 2.02, -0.15) // windscreen
-  for (const s of SIDES) {
-    bx(g, 0.08, 0.7, 1.1, glass(), s * 1.31, 3.1, 1.05)
-    bx(g, 0.06, 0.28, 6.2, paint('#f2f4f7', 0.2, 0.4), s * 1.31, 2.0, 0.3) // stripe
-    cy(g, 0.18, 0.18, 3.6, chrome(), s * 1.42, 3.0, -0.25, 0, 0, 0, 12) // smokestacks
-    cy(g, 0.42, 0.42, 1.6, chrome(), s * 1.3, 1.05, 1.0, Math.PI / 2, 0, 0, 14) // fuel tanks
-    bx(g, 0.5, 0.3, 0.08, mats.lamp(), s * 0.85, 1.75, 4.52)
-  }
-  bx(g, 1.7, 1.25, 0.12, chrome(), 0, 1.95, 4.5) // grille
-  for (let i = 0; i < 6; i++) bx(g, 0.08, 1.1, 0.06, dark, -0.62 + i * 0.25, 1.95, 4.58)
-  bx(g, 2.6, 0.42, 0.3, chrome(), 0, 0.95, 4.65) // bumper
-  bx(g, 1.8, 0.2, 1.8, dark, 0, 1.2, -3.2) // fifth wheel
-  for (const s of SIDES) {
-    wheel(g, s * 1.2, 0.6, 3.2)
-    for (const z of [-2.4, -3.8]) {
-      wheel(g, s * 1.05, 0.6, z)
-      wheel(g, s * 1.48, 0.6, z, 0.6, 0.35)
-    }
-  }
-  return g
-}
-
-function makeJet(flames) {
-  const g = new Group()
-  const white = paint('#f2f4f7', 0.3, 0.3)
-  const gold = paint('#ffb21f', 0.35, 0.35)
-  const dark = paint('#3a3f4a', 0.45, 0.4)
-  cy(g, 0.85, 0.95, 8, white, 0, 1.7, -0.6, Math.PI / 2, 0, 0, 16) // fuselage
-  const nose = new Mesh(once('jetNose', () => new ConeGeometry(0.85, 2.6, 16)), white)
-  nose.rotation.x = Math.PI / 2
-  nose.position.set(0, 1.7, 4.7)
-  nose.castShadow = true
-  g.add(nose)
-  const canopy = new Mesh(sphereGeo(0.8), glass())
-  canopy.scale.set(0.75, 0.6, 1.9)
-  canopy.position.set(0, 2.35, 2.0)
-  g.add(canopy)
-  for (const s of SIDES) {
-    const wing = new Group()
-    wing.position.set(s * 0.8, 1.5, -0.6)
-    wing.rotation.y = s * -0.42
-    g.add(wing)
-    bx(wing, 4.6, 0.18, 2.5, white, s * 2.3, 0, 0)
-    bx(wing, 1.0, 0.2, 2.52, gold, s * 4.1, 0, 0)
-    bx(g, 0.18, 1.9, 1.6, white, s * 0.75, 2.8, -4.0, 0.25, 0, s * -0.3) // tail fins
-    bx(g, 2.2, 0.12, 1.2, white, s * 1.6, 1.85, -4.2, 0, s * -0.3) // stabilisers
-    cy(g, 0.5, 0.5, 2.0, dark, s * 1.15, 1.35, -3.6, Math.PI / 2, 0, 0, 12) // engines
-    flames.push(flame(g, s * 1.15, 1.35, -4.6, 1.2, 'back'))
-    bx(g, 0.12, 0.7, 0.12, dark, s * 1.4, 0.55, -0.6) // landing gear
-    cy(g, 0.28, 0.28, 0.2, mats.tyre(), s * 1.4, 0.28, -0.6, 0, 0, Math.PI / 2, 10)
-  }
-  bx(g, 0.12, 0.9, 0.12, dark, 0, 0.6, 3.6)
-  cy(g, 0.26, 0.26, 0.2, mats.tyre(), 0, 0.26, 3.6, 0, 0, Math.PI / 2, 10)
-  bx(g, 0.06, 0.25, 5.5, gold, 0.86, 1.8, 0.4)
-  bx(g, 0.06, 0.25, 5.5, gold, -0.86, 1.8, 0.4)
-  return g
-}
-
-// Returns { group, update(dt, ctx) }; ctx: { speed m/s, thrust 0..1 }.
-export function makeVehicle(kind, scale = 0.55) {
-  const fx = { flames: [], spin: [], wheels: [] }
-  let model
-  if (kind === 'mixer') {
-    model = makeMixerTruck('#2f6fd0')
-    fx.spin.push(model.userData.drum)
-  } else if (kind === 'truck') model = makeBigRig()
-  else model = makeJet(fx.flames)
-  const group = new Group()
-  model.scale.setScalar(scale)
-  group.add(model)
-  model.traverse((o) => {
-    if (o.isMesh) o.castShadow = true
-  })
-  return {
-    group,
-    model,
-    update(dt, ctx) {
-      for (const d of fx.spin) d.rotateY(dt * 1.8)
-      for (const f of fx.flames) {
-        const on = ctx.thrust > 0.04
-        f.visible = on
-        if (on) {
-          const s = f.userData.size * (0.4 + ctx.thrust * 0.9) * (0.85 + Math.random() * 0.3)
-          f.scale.set(f.userData.size, s, f.userData.size)
-        }
-      }
-    },
-  }
 }
 
 // --- Dropship (Titan Armor's delivery), metres, front +Z --------------------------------------------------

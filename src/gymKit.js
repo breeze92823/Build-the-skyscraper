@@ -93,7 +93,7 @@ function plateGeo(R, W) {
 
 // --- Bench press ------------------------------------------------------------------------------
 // Local frame: feet toward +Z, the rack at the head end (-Z), base on the pad at y = 0. The
-// bar rests on the J-hooks at barRest, `barZ` from the bench centre; main.js / bots.js move it
+// bar rests on the J-hooks at barRest, `barZ` from the bench centre; main.js moves it
 // between barLow (on the chest) and barHigh (arms locked out). The cushion top is at 0.645.
 export const BENCH = { barZ: -1.0, barRest: 1.42, barLow: 1.1, barHigh: 1.52 }
 

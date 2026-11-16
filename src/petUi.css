@@ -250,104 +250,184 @@
   transform: rotate(10deg);
 }
 
-/* --- Pets window ---------------------------------------------------------------------------------- */
-.w-pets { --uiw-w: 860; --uiw-h: 620; }
+/* --- Pets window (dark frame, rewardsUi.css .uiw-dark): header bar, four tools, tile grid ------------ */
+.w-pets { --uiw-w: 1020; --uiw-h: 420; }
 .w-merge { --uiw-w: 760; --uiw-h: 560; }
-.pt-head {
-  display: flex;
-  border-radius: calc(16 * var(--uiw-u));
-  background: #2b2f3a;
-  padding: calc(10 * var(--uiw-u));
-  color: #fff;
+.w-pets .uiw-body {
+  position: relative;
+  padding: calc(26 * var(--uiw-u)) calc(16 * var(--uiw-u)) calc(16 * var(--uiw-u));
+  gap: calc(10 * var(--uiw-u));
 }
-.pt-head > div {
-  flex: 1;
+.pt-top {
   display: flex;
-  flex-direction: column;
   align-items: center;
-}
-.pt-head > div + div { border-left: 2px solid #4a4f5c; }
-.pt-head span { font-size: max(10px, calc(17 * var(--uiw-u))); color: #c9ccd2; }
-.pt-head b { font-size: max(16px, calc(32 * var(--uiw-u))); }
-.pt-head b.g { color: #7dff6b; }
-.pt-tools {
-  display: flex;
+  justify-content: space-between;
   gap: calc(12 * var(--uiw-u));
-  justify-content: center;
+  min-height: calc(62 * var(--uiw-u));
+  padding: calc(6 * var(--uiw-u)) calc(24 * var(--uiw-u));
+  border: max(2px, calc(4 * var(--uiw-u))) solid #16141c;
+  border-radius: calc(16 * var(--uiw-u));
+  background: #252528;
+}
+.pt-eq {
+  font-size: max(13px, calc(28 * var(--uiw-u)));
+  line-height: 1.1;
+}
+.pt-eq b { color: #ffd23a; }
+.pt-eq i { font-style: normal; margin: 0 calc(10 * var(--uiw-u)); color: #c9ccd2; }
+.pt-eq .g { color: #7dff5a; }
+.pt-cap {
+  flex: none;
+  font-size: max(15px, calc(34 * var(--uiw-u)));
+}
+.pt-tools {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: calc(12 * var(--uiw-u));
 }
 .uiw-btn.pt-tool {
   width: auto;
-  min-width: calc(200 * var(--uiw-u));
-  height: max(44px, calc(58 * var(--uiw-u)));
-  font-size: max(14px, calc(26 * var(--uiw-u)));
+  min-width: 0;
+  height: max(44px, calc(64 * var(--uiw-u)));
+  font-size: max(13px, calc(32 * var(--uiw-u)));
+  flex-direction: row;
+  gap: calc(8 * var(--uiw-u));
+  border-radius: calc(16 * var(--uiw-u));
+}
+.uiw-btn.pt-tool.on { box-shadow: 0 0 0 max(2px, calc(4 * var(--uiw-u))) #fff, inset 0 calc(-7 * var(--uiw-u)) 0 var(--btn-lip); }
+.uiw-btn.yellow {
+  --btn-lip: #a86a00;
+  background: linear-gradient(#ffe45c, #ffcf1f 45%, #f5b800);
+}
+.uiw-btn.pt-tool.slot { padding-left: calc(6 * var(--uiw-u)); padding-right: calc(10 * var(--uiw-u)); }
+.pt-slot-ico {
+  flex: none;
+  width: max(22px, calc(44 * var(--uiw-u)));
+  height: max(22px, calc(44 * var(--uiw-u)));
+}
+.pt-slot-ico svg { width: 100%; height: 100%; }
+.pt-slot-txt { white-space: nowrap; }
+.pt-slot-price {
+  font-size: 0.62em;
+  padding: 0.1em 0.35em;
+  border-radius: 0.4em;
+  background: rgba(0, 0, 0, 0.28);
+  white-space: nowrap;
+  -webkit-text-stroke: 0;
 }
 .pt-grid {
+  flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(max(68px, calc(112 * var(--uiw-u))), 1fr));
-  gap: calc(10 * var(--uiw-u));
-  max-height: calc(330 * var(--uiw-u) + 60px);
+  grid-template-columns: repeat(auto-fill, minmax(max(84px, calc(150 * var(--uiw-u))), 1fr));
+  align-content: start;
+  gap: calc(12 * var(--uiw-u));
+  min-height: calc(200 * var(--uiw-u));
+  max-height: calc(380 * var(--uiw-u) + 60px);
   overflow-y: auto;
-  padding: 4px;
+  padding: calc(4 * var(--uiw-u)) calc(4 * var(--uiw-u)) calc(60 * var(--uiw-u));
   touch-action: pan-y;
 }
-.pt-card {
+.pt-pet {
   position: relative;
-  aspect-ratio: 1;
-  padding: 8% 8% 22%;
+  aspect-ratio: 150 / 196;
+  padding: 6% 6% 40%;
   border: max(2px, calc(4 * var(--uiw-u))) solid #16141c;
   border-radius: calc(16 * var(--uiw-u));
-  background: radial-gradient(circle at 50% 40%, var(--rc), var(--rd));
+  background: radial-gradient(circle at 50% 36%, var(--rc), var(--rd));
+  box-shadow: inset 0 0 0 max(1px, calc(3 * var(--uiw-u))) rgba(255, 255, 255, 0.35);
   cursor: pointer;
   font-family: inherit;
+  font-weight: 700;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
   transition: transform 0.08s;
 }
-.pt-card:active { transform: scale(0.95); }
-.pt-card.sel { box-shadow: 0 0 0 max(3px, calc(5 * var(--uiw-u))) #ffd23a; }
-.pt-card.tier1 { background: radial-gradient(circle at 50% 40%, #fff3a8, #d99a00); }
-.pt-card.tier2 { background: linear-gradient(135deg, #ff4d6d, #ffd23a, #4fe36a, #3ba7ff, #b45cff); }
+.pt-pet:active { transform: scale(0.95); }
+.pt-pet.eq { background: radial-gradient(circle at 50% 36%, #a8ff8a, #34c04a); }
+.pt-pet.tier1 { background: radial-gradient(circle at 50% 36%, #fff3a8, #d99a00); }
+.pt-pet.tier2 { background: linear-gradient(135deg, #ff4d6d, #ffd23a, #4fe36a, #3ba7ff, #b45cff); }
+.pt-pet.eq.tier1, .pt-pet.eq.tier2 { box-shadow: inset 0 0 0 max(2px, calc(5 * var(--uiw-u))) #7dff5a; }
 .pt-art { width: 100%; height: 100%; }
+.pt-name {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  bottom: 24%;
+  font-size: max(10px, calc(22 * var(--uiw-u)));
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .pt-boost {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 2px;
-  font-size: max(11px, calc(21 * var(--uiw-u)));
+  bottom: 7%;
+  font-size: max(10px, calc(22 * var(--uiw-u)));
+  line-height: 1;
+  color: #ffd23a;
   text-align: center;
 }
 .pt-check {
   position: absolute;
-  top: -6px;
-  left: -6px;
-  width: max(20px, calc(32 * var(--uiw-u)));
-  height: max(20px, calc(32 * var(--uiw-u)));
+  top: calc(-10 * var(--uiw-u));
+  right: calc(-10 * var(--uiw-u));
+  width: max(20px, calc(38 * var(--uiw-u)));
+  height: max(20px, calc(38 * var(--uiw-u)));
 }
 .pt-check svg { width: 100%; height: 100%; }
+/* SELL / DELETE modes: a price or an X on every pet; an armed pet pulses. */
+.pt-tag {
+  position: absolute;
+  top: 4%;
+  left: 4%;
+  padding: 0.12em 0.4em;
+  border-radius: 0.5em;
+  font-size: max(10px, calc(20 * var(--uiw-u)));
+  line-height: 1.1;
+}
+.pt-tag.sell { background: #f5b800; }
+.pt-tag.del { background: #e5272b; }
+.mode-sell .pt-pet { box-shadow: inset 0 0 0 max(2px, calc(4 * var(--uiw-u))) #ffd23a; }
+.mode-delete .pt-pet { box-shadow: inset 0 0 0 max(2px, calc(4 * var(--uiw-u))) #ff4a4b; }
+.pt-pet.armed { animation: pt-armed 0.5s ease-in-out infinite; }
+@keyframes pt-armed { 50% { transform: scale(1.05); } }
 .pt-empty {
+  grid-column: 1 / -1;
   padding: calc(30 * var(--uiw-u)) calc(20 * var(--uiw-u));
   text-align: center;
-  font-size: max(13px, calc(24 * var(--uiw-u)));
+  font-size: max(13px, calc(26 * var(--uiw-u)));
   font-weight: 500;
-  color: #4a4f5c;
+  color: #d6d9df;
 }
-.pt-bar {
-  display: flex;
-  align-items: center;
-  gap: calc(12 * var(--uiw-u));
-  padding: calc(8 * var(--uiw-u)) calc(12 * var(--uiw-u));
-  border: max(2px, calc(4 * var(--uiw-u))) solid var(--uiw-ink);
-  border-radius: calc(18 * var(--uiw-u));
-  background: linear-gradient(#f6f7fb, #e3e6ee);
-  flex-wrap: wrap;
+.pt-empty b { color: #ffd23a; }
+/* The message pill over the bottom of the grid. */
+.pt-msg {
+  position: absolute;
+  left: 50%;
+  bottom: calc(22 * var(--uiw-u));
+  width: min(86%, calc(860 * var(--uiw-u)));
+  transform: translateX(-50%);
+  padding: calc(8 * var(--uiw-u)) calc(20 * var(--uiw-u));
+  border-radius: 999px;
+  background: rgba(30, 30, 33, 0.92);
+  font-size: max(13px, calc(30 * var(--uiw-u)));
+  line-height: 1.15;
+  text-align: center;
+  color: #7dff5a;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s;
 }
-.pt-bar-art { width: max(44px, calc(70 * var(--uiw-u))); height: max(44px, calc(70 * var(--uiw-u))); }
-.pt-bar-info { flex: 1; min-width: 120px; }
-.pt-bar-name { font-size: max(14px, calc(28 * var(--uiw-u))); }
-.pt-bar-sub { font-size: max(11px, calc(19 * var(--uiw-u))); }
-.uiw-btn.pt-act {
-  width: auto;
-  min-width: calc(140 * var(--uiw-u));
-  height: max(44px, calc(56 * var(--uiw-u)));
-  font-size: max(14px, calc(26 * var(--uiw-u)));
+.pt-msg.bad { color: #ff7a7a; }
+.pt-msg.show { opacity: 1; }
+/* Phones: two rows of tools, smaller tiles. */
+@media (max-width: 600px) {
+  .pt-tools { grid-template-columns: repeat(2, 1fr); }
+  .w-pets { --uiw-w: 700; --uiw-h: 820; }
+  .pt-eq i { display: none; }
 }
 
 /* --- Pet Merge window ------------------------------------------------------------------------------ */

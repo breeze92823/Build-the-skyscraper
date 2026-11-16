@@ -199,88 +199,154 @@ function createHatchShow() {
 
 // --- Windows --------------------------------------------------------------------------------------
 function createPetWindows({ say }) {
-  let selected = null
-  let confirmDel = 0
-  const pets = createWindow({ title: 'Pets', icon: ICONS.pets, className: 'w-pets', onOpen: () => render(), onClose: () => (selected = null) })
-  function card(p, onTap) {
+  // Tapping a pet equips / unequips it. DELETE and SELL switch the grid into that mode (the button
+  // reads DONE): the first tap on a pet arms it, a second tap within a few seconds deletes / sells it.
+  let mode = 'equip' // 'equip' | 'delete' | 'sell'
+  let armed = null // { uid, until }
+  let msgT = 0
+  const pets = createWindow({
+    title: 'PETS',
+    icon: '',
+    className: 'w-pets uiw-dark',
+    onOpen: () => {
+      mode = 'equip'
+      armed = null
+      render()
+    },
+  })
+  const pct = (b) => `+${Math.round(b * 100)}%`
+  // The message pill over the bottom of the grid ("Equipped your best pets!").
+  function message(text, good = true) {
+    const m = pets.body.querySelector('.pt-msg')
+    if (!m) return
+    m.textContent = text
+    m.classList.toggle('bad', !good)
+    m.classList.remove('show')
+    void m.offsetWidth
+    m.classList.add('show')
+    clearTimeout(msgT)
+    msgT = setTimeout(() => m.classList.remove('show'), 2400)
+  }
+  function tile(p) {
     const def = S.petDef(p.id)
     const r = rarityOf(def)
-    const c = el('button', `pt-card${S.isEquipped(p.uid) ? ' eq' : ''}${selected === p.uid ? ' sel' : ''}${p.tier ? ` tier${p.tier}` : ''}`, `<div class="pt-art">${petSvg(def, p.tier)}</div><div class="pt-boost pt-txt">${boostText(S.petPower(p))}</div>${S.isEquipped(p.uid) ? `<div class="pt-check">${ICONS.check}</div>` : ''}`)
+    const eq = S.isEquipped(p.uid)
+    const isArmed = armed?.uid === p.uid && performance.now() < armed.until
+    const tag = mode === 'sell' ? `<div class="pt-tag sell pt-txt">${isArmed ? 'SELL?' : money(S.petSellValue(p))}</div>` : mode === 'delete' ? `<div class="pt-tag del pt-txt">${isArmed ? 'DELETE?' : 'X'}</div>` : ''
+    const c = el(
+      'button',
+      `pt-pet${eq ? ' eq' : ''}${p.tier ? ` tier${p.tier}` : ''}${isArmed ? ' armed' : ''}`,
+      `<div class="pt-art">${petSvg(def, p.tier)}</div><div class="pt-name pt-txt">${petTitle(def, p.tier)}</div><div class="pt-boost pt-txt">${pct(S.petPower(p))} Boost</div>${eq ? `<div class="pt-check">${ICONS.check}</div>` : ''}${tag}`,
+    )
     c.type = 'button'
     c.style.setProperty('--rc', r.color)
     c.style.setProperty('--rd', r.dark)
-    c.title = `${petTitle(def, p.tier)} (${r.name})`
-    c.addEventListener('click', () => onTap(p))
+    c.title = `${petTitle(def, p.tier)} (${r.name}): ${pct(S.petPower(p))} cash & gym`
+    c.addEventListener('click', () => tapPet(p, c))
     return c
+  }
+  function tapPet(p, c) {
+    if (mode === 'equip') {
+      const eq = S.isEquipped(p.uid)
+      if (!S.equipPet(p.uid)) {
+        replay(c, 'shake')
+        message(`All ${S.petSlots()} slots are full! Unequip one first.`, false)
+        return
+      }
+      if (eq) sfx.pop(false)
+      else sfx.equip()
+      message(eq ? `${S.petDef(p.id).name} unequipped.` : `${S.petDef(p.id).name} equipped!`)
+      return
+    }
+    const now = performance.now()
+    if (armed?.uid !== p.uid || now > armed.until) {
+      armed = { uid: p.uid, until: now + 3000 }
+      sfx.confirmTap()
+      render()
+      message(mode === 'sell' ? `Tap again to sell for ${money(S.petSellValue(p))}` : 'Tap again to delete it for good', mode === 'sell')
+      return
+    }
+    armed = null
+    const name = petTitle(S.petDef(p.id), p.tier)
+    const at = centre(c)
+    if (mode === 'sell') {
+      const v = S.sellPet(p.uid)
+      sfx.sell(Math.min(1, Math.log10(v + 1) / 7))
+      burst(...at, 'coins')
+      message(`Sold ${name} for ${money(v)}!`)
+    } else {
+      S.deletePet(p.uid)
+      sfx.trash()
+      message(`${name} deleted.`)
+    }
+    if (!state.pets.length) setMode('equip')
+  }
+  function setMode(m) {
+    mode = mode === m ? 'equip' : m
+    armed = null
+    sfx.toggle(mode !== 'equip')
+    render()
+    if (mode === 'sell') message('Tap a pet to sell it for cash')
+    else if (mode === 'delete') message('Tap a pet to delete it', false)
   }
   function render() {
     const b = pets.body
+    const oldGrid = b.querySelector('.pt-grid')
+    const scroll = oldGrid ? oldGrid.scrollTop : 0
+    const oldMsg = b.querySelector('.pt-msg')
     b.innerHTML = ''
-    const head = el('div', 'pt-head', `<div><span>EQUIPPED</span><b>${state.petEq.length}/${S.petSlots()}</b></div><div><span>STORAGE</span><b>${state.pets.length}/${PET.storage}</b></div><div><span>PET BOOST</span><b class="g">${boostText(S.petBonus())}</b></div>`)
-    b.append(head)
+    b.classList.toggle('mode-sell', mode === 'sell')
+    b.classList.toggle('mode-delete', mode === 'delete')
+    const boost = S.petBonus()
+    const head = el('div', 'pt-top', `<div class="pt-eq pt-txt">EQUIPPED <b>${state.petEq.length}/${S.petSlots()}</b><i>•</i><span class="g">${pct(boost)}</span> Cash <span class="g">${pct(boost)}</span> Gym</div><div class="pt-cap pt-txt">${state.pets.length}/${PET.storage}</div>`)
     const tools = el('div', 'pt-tools')
-    tools.append(
-      uiButton('Equip Best', 'green', () => {
-        S.equipBest()
-        sfx.equip()
-        render()
-      }, 'pt-tool'),
-      uiButton('Unequip All', 'red', () => {
-        S.unequipAll()
-        render()
-      }, 'pt-tool'),
+    const slotPrice = S.nextSlotPrice()
+    const bBest = uiButton('EQUIP BEST', 'green', () => {
+      if (!state.pets.length) {
+        replay(bBest, 'shake')
+        message('Hatch some eggs first!', false)
+        return
+      }
+      S.equipBest()
+      sfx.equip()
+      message('Equipped your best pets!')
+    }, 'pt-tool')
+    const bDel = uiButton(mode === 'delete' ? 'DONE' : 'DELETE', 'red', () => setMode('delete'), `pt-tool${mode === 'delete' ? ' on' : ''}`)
+    const bSell = uiButton(mode === 'sell' ? 'DONE' : 'SELL', 'yellow', () => setMode('sell'), `pt-tool${mode === 'sell' ? ' on' : ''}`)
+    const bSlot = uiButton(
+      `<span class="pt-slot-ico">${ICONS.paw}</span><span class="pt-slot-txt">+1 SLOT</span><span class="pt-slot-price">${slotPrice == null ? 'MAX' : money(slotPrice)}</span>`,
+      slotPrice == null ? 'grey' : 'green',
+      () => {
+        const r = S.buyPetSlot()
+        if (r.max) {
+          replay(bSlot, 'shake')
+          message(`You have every extra slot (${S.petSlots()})!`, false)
+        } else if (r.need) {
+          replay(bSlot, 'shake')
+          message(`Need ${money(r.need)} more for a slot!`, false)
+        } else if (r.done) {
+          sfx.slotBuy()
+          burst(...centre(bSlot), 'stars')
+          message(`+1 pet slot! You can equip ${S.petSlots()} pets now.`)
+        }
+      },
+      'pt-tool slot',
     )
-    b.append(tools)
-    if (!state.pets.length) {
-      b.append(el('div', 'pt-empty', 'No pets yet! Hatch eggs in the <b>Egg Hall</b> (south of the road, east of the leaderboard). Pets boost your cash and gym gains.'))
-      return
-    }
+    tools.append(bBest, bDel, bSell, bSlot)
     const grid = el('div', 'pt-grid')
-    const list = [...state.pets].sort((a, b2) => Number(S.isEquipped(b2.uid)) - Number(S.isEquipped(a.uid)) || S.petPower(b2) - S.petPower(a))
-    for (const p of list) {
-      grid.append(
-        card(p, (q) => {
-          selected = selected === q.uid ? null : q.uid
-          confirmDel = 0
-          render()
-        }),
-      )
-    }
-    const sel = state.pets.find((p) => p.uid === selected)
-    if (sel) {
-      const def = S.petDef(sel.id)
-      const r = rarityOf(def)
-      const bar = el('div', 'pt-bar', `<div class="pt-bar-art">${petSvg(def, sel.tier)}</div><div class="pt-bar-info"><div class="pt-bar-name">${petTitle(def, sel.tier)}</div><div class="pt-bar-sub" style="color:${r.dark}">${r.name} · ${boostText(S.petPower(sel))} cash &amp; gym</div></div>`)
-      const eq = S.isEquipped(sel.uid)
-      const full = !eq && state.petEq.length >= S.petSlots()
-      const be = uiButton(eq ? 'Unequip' : full ? 'Slots full' : 'Equip', eq ? 'red' : full ? 'red' : 'green', () => {
-        if (!S.equipPet(sel.uid)) {
-          replay(be, 'shake')
-          say(`All ${S.petSlots()} slots are full. Unequip one first.`, false)
-          return
-        }
-        if (!eq) sfx.equip()
-        render()
-      }, 'pt-act')
-      const bd = uiButton(Date.now() < confirmDel ? 'Sure?' : 'Delete', 'red', () => {
-        if (Date.now() > confirmDel) {
-          confirmDel = Date.now() + 2500
-          render()
-          return
-        }
-        S.deletePet(sel.uid)
-        sfx.trash()
-        selected = null
-        confirmDel = 0
-        render()
-      }, 'pt-act')
-      bar.append(be, bd)
-      b.append(bar)
+    if (!state.pets.length) {
+      grid.append(el('div', 'pt-empty', 'No pets yet! Hatch eggs in the <b>Egg Hall</b> (south of the road, east of the leaderboard). Equipped pets boost your cash and gym gains.'))
     } else {
-      b.append(el('div', 'w-note', 'Tap a pet to equip or delete it. Equipped pets follow you and add their boost to your cash and gym gains.'))
+      const list = [...state.pets].sort((x, y) => Number(S.isEquipped(y.uid)) - Number(S.isEquipped(x.uid)) || S.petPower(y) - S.petPower(x))
+      for (const p of list) grid.append(tile(p))
     }
-    // The grid goes last so the selected pet's buttons stay in view above it.
-    b.append(grid)
+    const msg = el('div', 'pt-msg pt-txt')
+    if (oldMsg?.classList.contains('show')) {
+      msg.textContent = oldMsg.textContent
+      msg.className = oldMsg.className
+    }
+    b.append(head, tools, grid, msg)
+    grid.scrollTop = scroll
   }
 
   // Pet Merge machine.
@@ -325,6 +391,9 @@ function createPetWindows({ say }) {
   return {
     pets,
     merge,
+    refreshPets() {
+      if (pets.isOpen()) render()
+    },
     refresh() {
       if (pets.isOpen()) render()
       if (merge.isOpen()) renderMerge()
@@ -407,11 +476,29 @@ export function createPets({ hall, say, openShop }) {
     windows.refresh()
     panel.render()
   })
+  // A free egg (playtime reward): one hatch with the show, no cash spent. Full storage pays the egg's
+  // price instead.
+  async function freeHatch(eggId) {
+    const def = S.eggDef(eggId)
+    if (!def) return
+    if (S.petFree() <= 0) {
+      S.addCash(def.price)
+      say(`Pet storage full! +${money(def.price)} instead of the ${def.name}.`, true)
+      return
+    }
+    while (show.busy) await new Promise((r) => setTimeout(r, 150))
+    const pd = S.rollEgg(eggId)
+    const isNew = !state.petSeen[pd.id]
+    const p = S.addPet(pd.id)
+    await show.play(eggId, [{ def: pd, tier: 0, isNew, uid: p?.uid, id: pd.id }], false)
+    say(`${pd.name} hatched from your free ${def.name}!`, true)
+  }
   S.on('pass', () => panel.render())
   return {
     panel,
     windows,
     show,
+    freeHatch,
     // E / F / T: only while an egg panel is showing. Returns true when it handled the key.
     key(which) {
       if (!panel.egg || anyWindowOpen()) return false

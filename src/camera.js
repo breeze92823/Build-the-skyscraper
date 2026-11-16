@@ -55,6 +55,21 @@ onModeChanged((mode) => {
   }
 })
 
+// A short decaying camera shake (heavy landings); amount in m.
+let shakeAmp = 0
+let shakeT = 0
+export function shakeCamera(amount) {
+  shakeAmp = Math.max(shakeAmp, amount)
+}
+function applyShake(camera, dt) {
+  if (shakeAmp < 0.002) return
+  shakeT += dt
+  camera.position.x += Math.sin(shakeT * 71) * shakeAmp
+  camera.position.y += Math.sin(shakeT * 83 + 1.3) * shakeAmp
+  camera.position.z += Math.sin(shakeT * 67 + 2.1) * shakeAmp
+  shakeAmp *= Math.exp(-CAMERA.shakeDecay * dt)
+}
+
 export function update(camera, dt) {
   state.yaw -= inputState.look.dx * CAMERA.lookSensitivity * sensitivity
   state.pitch += inputState.look.dy * CAMERA.lookSensitivity * sensitivity
@@ -120,6 +135,7 @@ export function update(camera, dt) {
     const cp = Math.cos(state.pitch)
     camera.position.set(followed.x, eyeY, followed.z)
     camera.lookAt(followed.x - Math.sin(state.yaw) * cp, eyeY - Math.sin(state.pitch), followed.z - Math.cos(state.yaw) * cp)
+    applyShake(camera, dt)
     return
   }
 
@@ -143,4 +159,5 @@ export function update(camera, dt) {
 
   camera.position.set(look.x + (px - look.x) * clearance, look.y + (py - look.y) * clearance, look.z + (pz - look.z) * clearance)
   camera.lookAt(look.x, look.y, look.z)
+  applyShake(camera, dt)
 }

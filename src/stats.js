@@ -1,11 +1,11 @@
-import { CREW, DAILY, EGGS, GIFT, PET, PETS, PET_PASSES, RANKS, RANK_CASH_BONUS, ROBOT, ROBOT_GEAR, SAVE, SHOP, SPIN, STATS, UPGRADES } from './config.js'
+import { COMBO, EGGS, GYM, LUCKY, PET, PETS, PET_PASSES, RANKS, RANK_CASH_BONUS, RARITIES, REWARDS, ROBOT, ROBOT_GEAR, SAVE, SHOP, SPIN, STATS, UPGRADES } from './config.js'
 
 // The local player's progress (the one thing that is saved), what it adds up to
 // (capacity, walk speed, rates, multipliers, rank) and a tiny event bus the HUD,
 // windows and world systems listen on. Mutate only through the helpers below so
 // every change is announced.
 
-export const state = {
+const fresh = () => ({
   cash: 0,
   strength: STATS.startStrength,
   speed: STATS.startSpeed,
@@ -15,9 +15,11 @@ export const state = {
   upgrades: Object.fromEntries(UPGRADES.map((u) => [u.id, 0])),
   passes: {}, // id -> true
   gymOwned: {}, // premium gym tier index -> true
-  crew: [], // worker names
-  daily: { day: '', streak: 0 }, // last claimed day (YYYY-MM-DD) and how many in a row
-  giftIn: GIFT.every, // s of play until the free gift
+  // Daily / Playtime / Free rewards as the browser keeps them (guests, offline): rewards.js. Signed-in
+  // players' live on the server instead (it sends them; this copy is not used then).
+  rewards: { streak: 0, last: -1, playDay: -1, playSec: 0, playClaimed: [], free: false },
+  freeSteps: 0, // bit per Free Reward step ticked
+  timed: [], // running timed boosts: { stat: 'cash' | 'strength' | 'speed', mult, left (s of play) }
   playtime: 0,
   tower: null, // the shared tower's progress (tower.js owns the shape of it)
   rankSeen: 0, // highest rank already celebrated
@@ -26,8 +28,10 @@ export const state = {
   petEq: [], // uids of the pets out with you
   petSeen: {}, // pet id -> true once hatched (the egg panel shows the rest as silhouettes)
   petUid: 1,
+  petSlots: 0, // extra pet slots bought (PET.extraSlots)
   spins: { normal: SPIN.start, golden: 0, pity: 0 },
-}
+})
+export const state = fresh()
 
 // --- Events ------------------------------------------------------------------------------
 const listeners = new Map()
@@ -41,7 +45,7 @@ export function emit(name, data) {
   if (set) for (const fn of set) fn(data)
 }
 
-// --- Multipliers that come from outside the save (world events, crew) -----------------------
+// --- Multipliers that come from outside the save (world events) -----------------------
 export const boosts = { eventCash: 1, eventGym: 1, eventBuild: 1, gearBuild: 1 } // gearBuild: Titan Armor's drop boost
 
 // --- Derived -----------------------------------------------------------------------------
@@ -52,17 +56,57 @@ export const gearDef = (id) => ROBOT_GEAR.find((g) => g.id === id) ?? null
 export const gearOn = () => gearDef(state.gear.on)
 export const gearBlocks = () => gearOn()?.blocks ?? 1
 export const gearBuild = () => (gearOn()?.build ?? 1) * boosts.gearBuild
-export const capacity = () => Math.floor(STATS.capacity(state.strength) * (state.passes.bag2 ? 1.5 : 1)) + (gearOn()?.capacity ?? 0)
+// Capacity / walk speed at a given Strength / Speed (the offline reward previews "before > after").
+export const capacityFor = (strength) => Math.floor(STATS.capacity(strength) * (state.passes.bag2 ? 1.5 : 1)) + (gearOn()?.capacity ?? 0)
+export const capacity = () => capacityFor(state.strength)
 // The HUD shows walk speed x 3.6, so a gear's +N Walk Speed is N / 3.6 m/s.
-export const walkSpeed = () => Math.min(ROBOT.maxWalk, STATS.walkSpeed(state.speed) + (gearOn()?.walk ?? 0) / 3.6)
+export const walkSpeedFor = (speed) => Math.min(ROBOT.maxWalk, STATS.walkSpeed(speed) + (gearOn()?.walk ?? 0) / 3.6)
+export const walkSpeed = () => walkSpeedFor(state.speed)
 export const bagFull = () => state.bag >= capacity()
 // Blocks per second into the bag in the pit / out of it at the build.
 export const grabRate = () => Math.max(STATS.minRate, (capacity() / STATS.fillTime) * upgradeValue('grab') * boosts.eventBuild)
-export const buildRate = () => Math.max(STATS.minRate, (capacity() / STATS.buildTime) * upgradeValue('build') * boosts.eventBuild * gearBuild())
+export const buildRate = () => Math.max(STATS.minRate, (capacity() / STATS.buildTime) * upgradeValue('build') * upgradeValue('hands') * boosts.eventBuild * gearBuild())
 export const buildRange = () => upgradeValue('range')
+// Wide Trowel: every block out of the bag places this many blocks (stacks with the worn gear's).
+export const trowelMul = () => upgradeValue('trowel')
+
+// --- Coin Combo: placing blocks without a break fills the combo, which multiplies cash --------
+const combo = { t: 0, idle: 0 } // t = 0..1 how full, idle = s since the last block
+export const comboMax = () => upgradeValue('combo')
+export const comboFill = () => combo.t
+// Current cash multiplier from the combo (1 until the upgrade is bought).
+export const comboMul = () => 1 + (comboMax() - 1) * combo.t
+// Call every frame: `building` is true while blocks are going into the tower.
+export function tickCombo(dt, building) {
+  if (building) {
+    combo.idle = 0
+    combo.t = Math.min(1, combo.t + dt / COMBO.ramp)
+  } else {
+    combo.idle += dt
+    if (combo.idle > COMBO.grace) combo.t = Math.max(0, combo.t - (dt / COMBO.ramp) * COMBO.drain)
+  }
+}
+export const comboReset = () => {
+  combo.t = 0
+  combo.idle = 0
+}
+
+// --- Lucky drops: Fortune Luck chance per placed block, Golden Touch coins per drop ---------------
+export const luckChance = () => upgradeValue('fortune') / 100
+export const luckCoins = () => upgradeValue('golden')
+export const coinCash = () => LUCKY.coinValue * cashMultiplier()
+// Rolls the lucky drops for `blocks` placed blocks: { drops, coins, cash } (stochastic rounding,
+// so big batches stay cheap and small ones still feel random).
+export function rollLucky(blocks) {
+  const want = blocks * luckChance()
+  let drops = Math.floor(want)
+  if (Math.random() < want - drops) drops++
+  if (!drops) return null
+  const coins = drops * luckCoins()
+  return { drops, coins, cash: Math.round(coins * coinCash()) }
+}
 export const liftSpeed = () => upgradeValue('lift')
 export const muscle = () => STATS.muscle(state.strength)
-export const crewBonus = () => Math.min(state.crew.length, CREW.max) * CREW.bonus
 
 export function rankIndex(blocks = state.totalBlocks) {
   let i = 0
@@ -73,9 +117,55 @@ export const rank = () => RANKS[rankIndex()]
 export const nextRank = () => RANKS[rankIndex() + 1] ?? null
 
 export function cashMultiplier() {
-  return (1 + rankIndex() * RANK_CASH_BONUS + crewBonus()) * (state.passes.cash2 ? 2 : 1) * boosts.eventCash * (1 + petBonus())
+  return (1 + rankIndex() * RANK_CASH_BONUS) * (state.passes.cash2 ? 2 : 1) * boosts.eventCash * (1 + petBonus()) * timedMul('cash')
 }
-export const gymMultiplier = (kind) => (kind === 'strength' ? (state.passes.str2 ? 2 : 1) : state.passes.spd2 ? 2 : 1) * boosts.eventGym * (1 + petBonus())
+export const gymMultiplier = (kind) => (kind === 'strength' ? (state.passes.str2 ? 2 : 1) : state.passes.spd2 ? 2 : 1) * boosts.eventGym * (1 + petBonus()) * timedMul(kind)
+
+// What a rep is worth with no event or running boost on: the 2x pass and the pets (offline training).
+export const gymBaseMultiplier = (kind) => (kind === 'strength' ? (state.passes.str2 ? 2 : 1) : state.passes.spd2 ? 2 : 1) * (1 + petBonus())
+// The multiplier of the best gym pad you may use (a premium pad you bought, a pad you won, or one your
+// finished buildings opened): same rule as gym.js tierUnlocked.
+export function bestGymMult() {
+  let best = 1
+  GYM.tiers.forEach((t, i) => {
+    if (state.gymOwned[i] || (t.price == null && state.buildings >= t.need)) best = Math.max(best, t.mult)
+  })
+  return best
+}
+
+// --- Timed boosts (reward prizes): x mult on cash / Strength gains / Speed gains for a while of play ---
+// Several can be held; per stat only the biggest one counts and ticks down, the rest wait their turn.
+export function timedMul(stat) {
+  let m = 1
+  for (const b of state.timed) if (b.stat === stat && b.left > 0 && b.mult > m) m = b.mult
+  return m
+}
+// The held boosts, biggest first per stat: [{ stat, mult, left, active }] (active = the one running).
+export function timedList() {
+  const list = [...state.timed].sort((a, b) => (a.stat === b.stat ? b.mult - a.mult : a.stat < b.stat ? -1 : 1))
+  return list.map((b, i) => ({ stat: b.stat, mult: b.mult, left: b.left, active: i === 0 || list[i - 1].stat !== b.stat }))
+}
+// The same stat and multiplier again adds its time.
+export function addTimed(stat, mult, seconds) {
+  const same = state.timed.find((b) => b.stat === stat && b.mult === mult)
+  if (same) same.left += seconds
+  else {
+    state.timed.push({ stat, mult, left: seconds })
+    if (state.timed.length > REWARDS.timedMax) state.timed.sort((a, b) => b.mult * b.left - a.mult * a.left).length = REWARDS.timedMax
+  }
+  emit('timed', { stat, mult, added: true })
+}
+// Every frame of play. Emits 'timed' { stat, mult, ended: true } when one runs out.
+export function tickTimed(dt) {
+  if (!state.timed.length) return
+  const top = {}
+  for (const b of state.timed) if (!top[b.stat] || b.mult > top[b.stat].mult) top[b.stat] = b
+  for (const b of Object.values(top)) b.left -= dt
+  const ended = state.timed.filter((b) => b.left <= 0)
+  if (!ended.length) return
+  state.timed = state.timed.filter((b) => b.left > 0)
+  for (const b of ended) emit('timed', { stat: b.stat, mult: b.mult, ended: true })
+}
 
 // --- Mutations ---------------------------------------------------------------------------
 export function addCash(n) {
@@ -103,7 +193,7 @@ export function placedBlocks(n, { pay = true } = {}) {
   const before = rankIndex()
   state.totalBlocks += n
   emit('placed', n)
-  if (pay) addCash(n * cashMultiplier())
+  if (pay) addCash(n * cashMultiplier() * comboMul())
   const after = rankIndex()
   if (after > before && after > state.rankSeen) {
     state.rankSeen = after
@@ -134,7 +224,34 @@ export const petDef = (id) => PETS.find((p) => p.id === id)
 export const eggDef = (id) => EGGS.find((e) => e.id === id)
 // One pet's boost (0.2 = +20% cash and gym gains), with its Golden / Rainbow tier.
 export const petPower = (p) => petDef(p.id).bonus * PET.tiers[p.tier ?? 0].mult
-export const petSlots = () => PET.slots + (state.passes.slots ? 2 : 0)
+export const petSlots = () => PET.slots + (state.passes.slots ? 2 : 0) + state.petSlots
+// The Pets window's +1 SLOT: the next slot's cash price, or null when all are bought.
+export const nextSlotPrice = () => PET.extraSlots[state.petSlots] ?? null
+export function buyPetSlot() {
+  const price = nextSlotPrice()
+  if (price == null) return { max: true }
+  if (!spend(price)) return { need: price - state.cash }
+  state.petSlots++
+  emit('pets', null)
+  return { done: true }
+}
+// What SELL pays for a pet: its egg's price x the rarity's share x its tier's multiplier.
+export function petSellValue(p) {
+  const def = petDef(p.id)
+  const egg = def.egg ? eggDef(def.egg) : null
+  const share = PET.sell[RARITIES[def.rarity]?.level ?? 0] ?? 0.1
+  return Math.max(1, Math.round((egg?.price ?? PET.sellLimited) * share * PET.tiers[p.tier ?? 0].mult))
+}
+export function sellPet(uid) {
+  const p = state.pets.find((q) => q.uid === uid)
+  if (!p) return 0
+  const value = petSellValue(p)
+  state.pets = state.pets.filter((q) => q.uid !== uid)
+  state.petEq = state.petEq.filter((u) => u !== uid)
+  addCash(value)
+  emit('pets', null)
+  return value
+}
 export const petBonus = () => {
   let b = 0
   for (const uid of state.petEq) {
@@ -243,6 +360,16 @@ export function addSpins(kind, n) {
   emit('spins', kind)
 }
 
+// A LIMITED gear piece's stock and countdown: { left, stock, endsIn (s) }, or null.
+export function limitedStatus(def, t = Date.now()) {
+  const L = def?.limited
+  if (!L) return null
+  const win = L.hours * 3600e3
+  const start = Math.floor(t / win) * win
+  const frac = (t - start) / win
+  const left = Math.max(L.floor, Math.round(L.stock - (L.stock - L.floor) * Math.pow(frac, 0.6)))
+  return { left, stock: L.stock, endsIn: (start + win - t) / 1000 }
+}
 // Robot Gear: buying wears it straight away. Returns { done } | { need } | { owned }.
 export function buyGear(id) {
   const def = gearDef(id)
@@ -263,29 +390,55 @@ export function wearGear(id) {
   return true
 }
 
-// --- Daily rewards -----------------------------------------------------------------------
-const today = () => new Date().toISOString().slice(0, 10)
-function dayDiff(a, b) {
-  return Math.round((Date.parse(b) - Date.parse(a)) / 86400000)
+// --- Reward prizes (rewards.js decides WHEN; this grants WHAT) ------------------------------------
+// def: a REWARDS entry. Returns what it became: { kind, cash?, gear?, dupe?, egg?, stat?, mult?, time? }.
+// An egg is only reported (petUi hatches it with the show).
+export function grantReward(def) {
+  if (def.kind === 'cash') {
+    const cash = rewardCash(def)
+    addCash(cash)
+    return { kind: 'cash', cash }
+  }
+  // Free upgrade levels (Invite Friends): `levels` more of one upgrade, or of every upgrade (id 'all'),
+  // never past the upgrade's max. Returns { kind: 'upgrade', ups: [{ id, name, levels (gained) }] }.
+  if (def.kind === 'upgrade') {
+    const ups = []
+    for (const u of UPGRADES) {
+      if (def.id !== 'all' && def.id !== u.id) continue
+      const before = state.upgrades[u.id] ?? 0
+      const after = Math.min(u.max, before + (def.levels ?? 1))
+      if (after === before) continue
+      state.upgrades[u.id] = after
+      ups.push({ id: u.id, name: u.name, levels: after - before })
+      emit('upgrade', u.id)
+    }
+    return { kind: 'upgrade', ups }
+  }
+  if (def.kind === 'boost') {
+    addTimed(def.stat, def.mult, def.time * 60)
+    return { kind: 'boost', stat: def.stat, mult: def.mult, time: def.time }
+  }
+  if (def.kind === 'gear') {
+    const g = gearDef(def.gear)
+    if (!g) return { kind: 'none' }
+    if (state.gear.owned[g.id]) {
+      const cash = Math.round(g.price * REWARDS.dupeGear)
+      addCash(cash)
+      return { kind: 'gear', gear: g.id, dupe: true, cash }
+    }
+    state.gear.owned[g.id] = true
+    emit('gearOwned', g.id)
+    return { kind: 'gear', gear: g.id }
+  }
+  if (def.kind === 'egg') return { kind: 'egg', egg: def.egg }
+  return { kind: 'none' }
 }
-// { canClaim, index (0..6 of today's reward), streak }
-export function dailyStatus() {
-  const d = state.daily
-  const t = today()
-  if (d.day === t) return { canClaim: false, index: (d.streak - 1) % DAILY.length, streak: d.streak }
-  const keep = d.day && dayDiff(d.day, t) === 1
-  const streak = keep ? d.streak : 0
-  return { canClaim: true, index: streak % DAILY.length, streak }
-}
-export function claimDaily() {
-  const s = dailyStatus()
-  if (!s.canClaim) return null
-  const reward = DAILY[s.index]
-  state.daily = { day: today(), streak: s.streak + 1 }
-  grant(reward)
-  emit('daily', reward)
-  return reward
-}
+// The cash a prize pays right now: `scale` prizes (Invite Friends) grow with the buildings you
+// finished, like the spin wheel's (x (1 + buildings * SPIN.scale)); the REWARDS ones are flat.
+export const rewardCash = (def) => (def.scale ? Math.round(def.amount * (1 + state.buildings * SPIN.scale)) : def.amount)
+// A prize that is a list (several things at once): grants each, returns the results in order.
+export const grantRewards = (prize) => (Array.isArray(prize) ? prize : [prize]).map(grantReward)
+// Dev helper (__game.give): cash / strength / speed straight in.
 export function grant(reward) {
   if (reward.cash) addCash(reward.cash)
   if (reward.strength) addStat('strength', reward.strength)
@@ -293,40 +446,84 @@ export function grant(reward) {
 }
 
 // --- Save / load ------------------------------------------------------------------------------
-const SAVED = ['cash', 'strength', 'speed', 'totalBlocks', 'buildings', 'bag', 'upgrades', 'passes', 'gymOwned', 'crew', 'daily', 'giftIn', 'playtime', 'tower', 'rankSeen', 'pets', 'petEq', 'petSeen', 'petUid', 'spins', 'gear']
+// The browser save (SAVE.key) is where guests and offline play keep their progress; signed-in
+// players' progress also lives on the server (net.js sends snapshot() and hydrates from it).
+const SAVED = ['cash', 'strength', 'speed', 'totalBlocks', 'buildings', 'bag', 'upgrades', 'passes', 'gymOwned', 'playtime', 'tower', 'rankSeen', 'pets', 'petEq', 'petSeen', 'petUid', 'petSlots', 'spins', 'gear', 'timed', 'rewards', 'freeSteps']
+const OWNER_KEY = `${SAVE.key}.owner`
+
+// Merges a saved object (the browser save or a server doc) into `state`.
+function apply(data) {
+  for (const k of SAVED) {
+    if (data[k] === undefined || data[k] === null) continue
+    if (k === 'upgrades') Object.assign(state.upgrades, data.upgrades)
+    else if (k === 'gear') state.gear = { owned: { ...data.gear?.owned }, on: data.gear?.owned?.[data.gear?.on] ? data.gear.on : null }
+    else if (k === 'spins') Object.assign(state.spins, data.spins)
+    else if (k === 'rewards') state.rewards = { ...state.rewards, ...data.rewards, playClaimed: Array.isArray(data.rewards.playClaimed) ? [...data.rewards.playClaimed] : [] }
+    else if (k === 'timed') state.timed = Array.isArray(data.timed) ? data.timed.filter((b) => b && b.left > 0 && b.mult > 1).map((b) => ({ stat: b.stat, mult: b.mult, left: b.left })) : []
+    else state[k] = data[k]
+  }
+  state.rankSeen = Math.max(state.rankSeen, rankIndex())
+  // Drop pets whose kind no longer exists and equipped uids that point nowhere.
+  state.pets = state.pets.filter((p) => petDef(p.id))
+  state.petEq = state.petEq.filter((u) => state.pets.some((p) => p.uid === u))
+  state.petUid = Math.max(state.petUid, ...state.pets.map((p) => p.uid + 1))
+  state.bag = Math.max(0, Math.min(state.bag, capacity()))
+}
 export function load() {
   try {
     const raw = localStorage.getItem(SAVE.key)
     if (!raw) return false
-    const data = JSON.parse(raw)
-    for (const k of SAVED) {
-      if (data[k] === undefined) continue
-      if (k === 'upgrades') Object.assign(state.upgrades, data.upgrades)
-      else if (k === 'gear') state.gear = { owned: { ...data.gear?.owned }, on: data.gear?.owned?.[data.gear?.on] ? data.gear.on : null }
-      else if (k === 'spins') Object.assign(state.spins, data.spins)
-      else state[k] = data[k]
-    }
-    state.rankSeen = Math.max(state.rankSeen, rankIndex())
-    // Drop pets whose kind no longer exists and equipped uids that point nowhere.
-    state.pets = state.pets.filter((p) => petDef(p.id))
-    state.petEq = state.petEq.filter((u) => state.pets.some((p) => p.uid === u))
+    apply(JSON.parse(raw))
     return true
   } catch {
     return false
   }
 }
+// The saved fields as a plain object (what net.js sends as `saveProgress`).
+export function snapshot() {
+  const out = {}
+  for (const k of SAVED) out[k] = state[k]
+  return out
+}
+// A server doc replaces the local progress (reset first, so nothing stale from this browser survives).
+export function hydrate(doc) {
+  if (!doc || typeof doc !== 'object') return false
+  resetState()
+  apply(doc)
+  return true
+}
+// Back to a brand-new player (what an account with no save of its own starts from).
+export function resetState() {
+  Object.assign(state, fresh())
+}
 export function save() {
   try {
-    const out = {}
-    for (const k of SAVED) out[k] = state[k]
-    localStorage.setItem(SAVE.key, JSON.stringify(out))
+    localStorage.setItem(SAVE.key, JSON.stringify(snapshot()))
   } catch {
     // Storage blocked or full: this session only.
+  }
+}
+// Whose progress the browser save holds: '' = a guest's (or not yet synced), else the account id.
+// A different account that signs in on this browser never inherits it.
+export function saveOwner() {
+  try {
+    return localStorage.getItem(OWNER_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+export function setSaveOwner(id) {
+  try {
+    if (id) localStorage.setItem(OWNER_KEY, id)
+    else localStorage.removeItem(OWNER_KEY)
+  } catch {
+    // Storage blocked: ownership is not tracked this session.
   }
 }
 export function resetSave() {
   try {
     localStorage.removeItem(SAVE.key)
+    localStorage.removeItem(OWNER_KEY)
   } catch {
     // Ignore.
   }

@@ -2,11 +2,32 @@
 // here may throw when the SDK is missing: a blocked sdk.bloxity.io leaves the
 // game fully playable on the default avatar and keyboard controls.
 // Docs: https://docs.bloxity.io/#html5
-import { GAME_SLUG, GAME_TITLE, SETTINGS, DEV_MODE, coerceSetting } from './config.js'
+import { BLOXITY_BOARDS, GAME_SLUG, GAME_TITLE, SETTINGS, DEV_MODE, coerceSetting } from './config.js'
 
 export function sdk() {
   if (DEV_MODE) return null
   return (typeof window !== 'undefined' && window.Legion && window.Legion.SDK) || null
+}
+
+// The hosts Bloxity told this page about ({ apiUrl, playUrl, staticUrl, ... }), {} when it told
+// nothing (older SDK builds, no SDK): callers fall back to the documented production hosts.
+export function environment() {
+  try {
+    return sdk()?.environment?.() ?? {}
+  } catch {
+    return {}
+  }
+}
+
+// The signed-in player's game token (a JWT the server verifies with Bloxity; never trust a client
+// id). '' for guests / no SDK. May be async in some SDK builds, hence the await.
+export async function getToken() {
+  try {
+    const t = await sdk()?.auth?.getToken?.()
+    return typeof t === 'string' ? t : ''
+  } catch {
+    return ''
+  }
 }
 
 // --- State --------------------------------------------------------------
@@ -24,6 +45,8 @@ const proportionListeners = new Set()
 const authListeners = new Set()
 const settingListeners = new Set()
 const respawnListeners = new Set()
+const adStartListeners = new Set()
+const adEndListeners = new Set()
 const unsubscribers = []
 
 function emit(listeners, ...args) {
@@ -60,6 +83,17 @@ export function onSetting(fn) {
 export function onRespawnRequest(fn) {
   respawnListeners.add(fn)
   return () => respawnListeners.delete(fn)
+}
+
+// Ad breaks (Legion.SDK.ads): start() must pause the game and mute it, end() resumes. start gets
+// { kind: 'midroll' | 'rewarded' }. Returns an unsubscribe.
+export function onAdBreak(start, end) {
+  if (start) adStartListeners.add(start)
+  if (end) adEndListeners.add(end)
+  return () => {
+    adStartListeners.delete(start)
+    adEndListeners.delete(end)
+  }
 }
 
 // --- Auth ---------------------------------------------------------------
@@ -112,13 +146,7 @@ export function getPfp() {
   const raw = authState.user?.pfp || authState.guest?.pfp
   if (typeof raw !== 'string' || !raw) return ''
   try {
-    let base = 'https://static.bloxity.io'
-    try {
-      base = sdk()?.environment?.()?.staticUrl || base
-    } catch {
-      // Older SDK builds have no environment().
-    }
-    const url = new URL(raw, base)
+    const url = new URL(raw, environment().staticUrl || 'https://static.bloxity.io')
     return /^https?:$/.test(url.protocol) ? url.href : ''
   } catch {
     return ''
@@ -182,6 +210,24 @@ export function init() {
         if (event === 'respawn_request') emit(respawnListeners)
       }),
     )
+
+    // Ad breaks pause + mute the game (required), and gameplay declares itself as an ad screen
+    // without slots (gameplay ads stay off unless the developer opts in).
+    try {
+      if (typeof SDK.ads?.onBreakStart === 'function') unsubscribers.push(SDK.ads.onBreakStart((e) => emit(adStartListeners, e)))
+      if (typeof SDK.ads?.onBreakEnd === 'function') unsubscribers.push(SDK.ads.onBreakEnd((e) => emit(adEndListeners, e)))
+      SDK.ads?.declareScreens?.({ gameplay: {} })
+    } catch (err) {
+      console.warn('[bloxity] ads setup failed', err)
+    }
+    // Boxity's own boards (the game page and the toolbar's trophy button). The ids are permanent,
+    // only the first declaration creates a board; the backend reports the real scores.
+    try {
+      const done = SDK.leaderboard?.define?.(BLOXITY_BOARDS)
+      done?.catch?.((err) => console.warn('[bloxity] leaderboard define failed', err))
+    } catch (err) {
+      console.warn('[bloxity] leaderboard define failed', err)
+    }
 
     SDK.game.loadingStep('Building the island')
   } catch (err) {
@@ -305,13 +351,7 @@ export function launchRoomId() {
 // can't be found. A bare id needs the matchmaker's cross-pod directory (a plain joinById through
 // any relay would usually land on another pod); a relay~room id is joined through its relay.
 export async function locateRoom(id) {
-  const playUrl = (() => {
-    try {
-      return sdk()?.environment?.()?.playUrl
-    } catch {
-      return '' // Older SDK builds have no environment().
-    }
-  })()
+  const playUrl = environment().playUrl
   if (!playUrl || !id) return null
   const base = playUrl.replace(/\/$/, '')
   const [relay, roomId] = id.includes('~') ? id.split('~', 2) : ['', id]
@@ -329,6 +369,54 @@ export function updateRoom(roomId) {
     sdk()?.game?.updateRoom?.(roomId)
   } catch {
     // Ignore.
+  }
+}
+
+// --- Friends and invites (Legion.SDK.social) ---------------------------------------------------------
+// Boxity draws its own invite / friends buttons, so the game only adds the in-world Invite Friends
+// kiosk (invite.js). Everything here is null-safe and never throws.
+
+// The ?ref= the page was opened with: the account id of the player whose invite link this is (the
+// backend credits them once this player has actually played). Id-shaped or ''.
+export function launchRef() {
+  try {
+    const ref = new URLSearchParams(location.search).get('ref') || ''
+    return /^[A-Za-z0-9_.#-]{1,128}$/.test(ref) ? ref : ''
+  } catch {
+    return ''
+  }
+}
+
+// Does the portal offer a friends list / direct invites?
+export const canInvite = () => typeof sdk()?.social?.inviteFriend === 'function'
+
+// The player's Boxity friends [{ _id, username, displayName, pfp, presence: { status, gameName } }] ([] when
+// there is no SDK, the player is a guest or the call fails).
+export async function getFriends() {
+  try {
+    const list = await sdk()?.social?.getFriends?.()
+    return Array.isArray(list) ? list : []
+  } catch {
+    return []
+  }
+}
+
+// A direct Boxity invite into this room (updateRoom has reported it). True when it was sent.
+export async function inviteFriend(userId) {
+  try {
+    return (await sdk()?.social?.inviteFriend?.(userId, GAME_SLUG)) === true
+  } catch {
+    return false
+  }
+}
+
+// The shareable invite link tagged with `ref`: the SDK's (portal page + this room), '' without it.
+export async function inviteLink(ref) {
+  try {
+    const link = await sdk()?.social?.getInviteFriendsLink?.({ gameSlug: GAME_SLUG, ...(ref && { ref }) })
+    return typeof link === 'string' ? link : ''
+  } catch {
+    return ''
   }
 }
 

@@ -33,9 +33,32 @@ import { mulberry32, paintConcrete, paintWindows, toTexture } from './textures.j
 // INSIDE.time: its two lowest floors turn into a lobby with a doorway on the south face
 // (lobby.js furnishes it), then it sinks into the sand and the next one starts.
 
+// Which BUILDINGS entry building n uses: the first is always BUILDINGS[0]; after that a
+// weighted roll on `chance` (never the same as the one before), seeded by n so everyone (and
+// a reload) gets the same pick.
+const picks = [0]
+function rollBuilding(n, prev) {
+  const rand = mulberry32(7919 * n + 1013)
+  rand()
+  const w = (i) => (i === prev ? 0 : (BUILDINGS[i].chance ?? 1))
+  let total = 0
+  for (let i = 0; i < BUILDINGS.length; i++) total += w(i)
+  let r = rand() * total
+  for (let i = 0; i < BUILDINGS.length; i++) {
+    r -= w(i)
+    if (r < 0) return i
+  }
+  return prev === 0 ? 1 : 0
+}
+export function pickBuilding(n) {
+  if (n <= 0) return 0
+  for (let k = picks.length; k <= n; k++) picks[k] = rollBuilding(k, picks[k - 1])
+  return picks[n]
+}
+
 export function buildingSpec(n) {
   const S = BUILDING_SCALE
-  const def = BUILDINGS[n % BUILDINGS.length]
+  const def = BUILDINGS[pickBuilding(n)]
   const floors = Math.min(S.floorsMax, S.floorsBase + n * S.floorsPer)
   const perFloor = []
   let total = 0
@@ -66,10 +89,23 @@ export function createTower(scene, saved) {
   // --- Progress ------------------------------------------------------------------------
   let spec = null
   let floors = 0 // finished floors
+  const contrib = new Map() // id -> { id, name, blocks } placed on the current building
   let floorBlocks = 0 // blocks in the floor being built
   let phase = 'building' // 'building' | 'celebrate' | 'sinking'
   let phaseTime = 0
   let sink = 0 // m sunk so far
+  let holdLeft = 0 // s the sunk building waits before the next one rises (`hold`)
+
+  // --- Shared mode: ONE tower per room, owned by the server (sync() drives everything below) -------------
+  // While `shared`, the displayed progress (floors, floorBlocks, phase, the next building rising) only ever
+  // follows the server's state; addBlocks just does the optimistic accounting and reports the blocks.
+  // Not shared (offline, not seeded yet, connection lost) the original local state machine runs as before.
+  let shared = false
+  let reporter = null // fn(n): blocks this player placed (net.sendBuild)
+  let builders = null // { n, list } the `built` message: top builders of the building that just finished
+  const srv = { ok: false, n: -1, floors: 0, blocks: 0, phase: '', phaseAt: 0 } // the last server state applied
+  let inflight = [] // { t, n } blocks reported but not yet in the server's state: caps what you may place
+  const INFLIGHT_MS = 1500 // ...for this long (a refused report must not block placing for ever)
 
   // --- Shared materials ------------------------------------------------------------------
   const concreteTex = toTexture(paintConcrete(256, '#b9bcc0', '#8f9399', 626), { srgb: true })
@@ -332,6 +368,8 @@ export function createTower(scene, saved) {
 
   function setBuilding(n, keep = null) {
     disposeBuilding()
+    contrib.clear()
+    builders = null
     spec = buildingSpec(n)
     floors = keep ? Math.min(keep.floors, spec.floors) : 0
     floorBlocks = keep ? Math.min(keep.blocks, spec.perFloor[floors] ?? 0) : 0
@@ -441,7 +479,9 @@ export function createTower(scene, saved) {
   // --- Building logic --------------------------------------------------------------------------------
   // Adds blocks to the floor in progress; completes floors (and the building). Returns the
   // number of blocks it took (0 once the building is done).
-  function addBlocks(n) {
+  // `who` = { id, name } of whoever placed them (the finale's Top Builders, `contributors()`).
+  function addBlocks(n, who = null) {
+    if (shared) return addBlocksShared(n, who)
     if (phase !== 'building' || n <= 0) return 0
     let left = n
     let taken = 0
@@ -451,11 +491,47 @@ export function createTower(scene, saved) {
       floorBlocks += put
       left -= put
       taken += put
+      // Credited before completeFloor: the last block can finish the building, and the
+      // 'complete' listeners read the final tally.
+      if (who && put > 0) {
+        const c = contrib.get(who.id)
+        if (c) c.blocks += put
+        else contrib.set(who.id, { id: who.id, name: who.name, blocks: put })
+      }
       if (floorBlocks >= needNow()) completeFloor()
     }
     syncBlocks()
     return taken
   }
+  // Blocks of the current building placed up to (finished floors f, `b` blocks into the next one).
+  function placedAt(f, b) {
+    let p = b
+    for (let i = 0; i < f; i++) p += spec.perFloor[i] ?? 0
+    return p
+  }
+  // Shared mode: the number of blocks that still fit in the building (per the latest server state minus
+  // what was reported but is not in it yet) goes to the caller for its bag / cash accounting and up to the
+  // server; the DISPLAYED progress changes only when the server's state comes back (~100 ms later).
+  function addBlocksShared(n, who) {
+    if (phase !== 'building' || !(n > 0)) return 0
+    const now = performance.now()
+    inflight = inflight.filter((e) => now - e.t < INFLIGHT_MS)
+    let pending = 0
+    for (const e of inflight) pending += e.n
+    const take = Math.min(Math.floor(n), Math.max(0, Math.floor(spec.total - placedAt(floors, floorBlocks) - pending)))
+    if (take <= 0) return 0
+    inflight.push({ t: now, n: take })
+    // Kept locally too: the fallback list when the server's `built` message does not arrive.
+    if (who) {
+      const c = contrib.get(who.id)
+      if (c) c.blocks += take
+      else contrib.set(who.id, { id: who.id, name: who.name, blocks: take })
+    }
+    reporter?.(take)
+    return take
+  }
+  // Who placed blocks on the current building, most first. Shared: the server's top builders (`built`).
+  const contributors = () => (shared && builders && spec && builders.n === spec.n ? builders.list.slice() : [...contrib.values()].sort((a, b) => b.blocks - a.blocks))
 
   function completeFloor() {
     floors++
@@ -498,7 +574,7 @@ export function createTower(scene, saved) {
 
   // The closest of the next `n` open cells (the build front) to (x, z), in world space,
   // with its distance: you build when you are within Build Range of the front, not just of
-  // the single next block (the front moves fast when the crew is busy).
+  // the single next block (the front moves fast when the room is busy).
   const frontV = new Vector3()
   function nearestFront(x, z, n = 40) {
     let best = null
@@ -580,7 +656,8 @@ export function createTower(scene, saved) {
       const halo = crown.getObjectByName('halo')
       if (halo) halo.rotation.z = elapsed * 0.6
     }
-    if (phase === 'celebrate' && phaseTime > INSIDE.time) {
+    // (Shared: the server decides when the open time is over, see sync.)
+    if (!shared && phase === 'celebrate' && phaseTime > INSIDE.time) {
       phase = 'sinking'
       phaseTime = 0
       clearColliders()
@@ -593,7 +670,101 @@ export function createTower(scene, saved) {
       group.position.y = -sink
       group.position.x = C.x + Math.sin(elapsed * 40) * 0.15 * (1 - t) // rumble
       emit('height', api)
-      if (t >= 1) setBuilding(spec.n + 1)
+      // Sunk: the next one rises once the Next Building reel is done (`hold`). Shared: it rises when the
+      // server says so (a new `n` in sync); the sunk building just waits.
+      if (t >= 1 && !shared) {
+        if (holdLeft > 0) holdLeft -= dt
+        else setBuilding(spec.n + 1)
+      }
+    }
+  }
+
+  // --- Shared tower: following the server's state ---------------------------------------------------------
+  // `ts` = { n, floors, blocks, phase ('building' | 'celebrate' | 'sinking'), phaseAt (server ms) } or null
+  // (not connected / not seeded: local mode), `now` = the server's clock (ms). Call it every frame: it does
+  // nothing unless the state changed. Everything the local game emitted before still fires ('floor',
+  // 'complete', 'building', 'height'), so the elevator, stairs, cranes, lobby, finale and main.js are unaware.
+  function setShared(on) {
+    on = !!on
+    if (on === shared) return
+    shared = on
+    srv.ok = false
+    inflight = []
+  }
+
+  // Raises the shown progress to the server's (`f` finished floors, `b` blocks into the next one), with the
+  // normal floor visuals / events for every floor on the way (the last one finishes the building).
+  function advanceTo(f, b) {
+    while (floors < f && phase === 'building') {
+      floorBlocks = needNow()
+      completeFloor()
+    }
+    if (phase === 'building') {
+      floorBlocks = Math.min(b, needNow())
+      syncBlocks()
+    }
+  }
+
+  function enterSinking(age) {
+    if (phase === 'celebrate') {
+      phase = 'sinking'
+      clearColliders()
+      emit('height', api)
+    }
+    if (phase === 'sinking') phaseTime = age
+  }
+
+  // The server's building is not the one shown (a new n, or a different room / reseed behind us): build it
+  // at the server's progress. A finished one (celebrate / sinking) shows its crown with the right age.
+  function rebuild(ts, age) {
+    const building = ts.phase === 'building'
+    setBuilding(ts.n, { floors: building ? ts.floors : 1e9, blocks: building ? ts.blocks : 0 })
+    if (!building) {
+      phaseTime = age
+      if (ts.phase === 'sinking') enterSinking(age)
+    }
+  }
+
+  function sync(ts, now) {
+    if (!!ts !== shared) setShared(!!ts)
+    if (!ts) return
+    if (srv.ok && ts.n === srv.n && ts.floors === srv.floors && ts.blocks === srv.blocks && ts.phase === srv.phase && ts.phaseAt === srv.phaseAt) return
+    // Blocks of ours the server has counted since the last state are no longer "in flight".
+    if (srv.ok && ts.n === srv.n && ts.n === spec.n) {
+      let d = placedAt(ts.floors, ts.blocks) - placedAt(srv.floors, srv.blocks)
+      while (d > 0 && inflight.length) {
+        const e = inflight[0]
+        if (e.n <= d) {
+          d -= e.n
+          inflight.shift()
+        } else {
+          e.n -= d
+          d = 0
+        }
+      }
+    } else inflight = []
+    srv.ok = true
+    srv.n = ts.n
+    srv.floors = ts.floors
+    srv.blocks = ts.blocks
+    srv.phase = ts.phase
+    srv.phaseAt = ts.phaseAt
+    const age = Math.max(0, (now - ts.phaseAt) / 1000)
+    // A different building, or one behind what we show (another room): rebuild it.
+    if (ts.n !== spec.n || ts.floors < floors || (ts.phase === 'building' && ts.floors === floors && phase === 'building' && ts.blocks < floorBlocks)) {
+      rebuild(ts, age)
+      return
+    }
+    if (ts.phase === 'building') {
+      if (phase !== 'building') return rebuild(ts, age) // the server's building is still open: ours was finished early
+      advanceTo(ts.floors, ts.blocks)
+      return
+    }
+    // celebrate / sinking: the building is finished (the last floor goes through the normal visuals if it was not).
+    advanceTo(spec.floors, 0)
+    if (phase === 'celebrate' || phase === 'sinking') {
+      if (ts.phase === 'sinking') enterSinking(age)
+      else if (phase === 'celebrate') phaseTime = age
     }
   }
 
@@ -631,6 +802,21 @@ export function createTower(scene, saved) {
     center: C,
     anchors,
     addBlocks,
+    contributors,
+    // Shared tower (one per room, the server's): see sync(). `shared` is true while it follows the server.
+    get shared() {
+      return shared
+    },
+    sync,
+    setShared,
+    // fn(n) gets the blocks this player places while shared (net.sendBuild).
+    setReporter(fn) {
+      reporter = fn
+    },
+    // The server's `built` message for building n: its top builders ({ id, name, blocks }, most first).
+    setBuilders(n, list) {
+      builders = { n, list: Array.isArray(list) ? list : [] }
+    },
     onRoof,
     cursor,
     nearestFront,
@@ -642,6 +828,10 @@ export function createTower(scene, saved) {
     // Lift anything standing on the roof when a floor completes (callers pass their own).
     toSave: () => ({ n: spec.n, floors, blocks: floorBlocks }),
     setBuilding,
+    // Keeps the next building from rising for `s` more seconds after this one has sunk.
+    hold(s) {
+      holdLeft = Math.max(0, s)
+    },
   }
   const s = saved && Number.isFinite(saved.n) ? saved : null
   setBuilding(s ? s.n : 0, s)

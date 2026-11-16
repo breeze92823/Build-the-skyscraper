@@ -102,6 +102,23 @@ export const LIGHT = {
   lampDistance: 22,
 }
 
+// Night lighting (nightLights.js), all fading in with the lamps at dusk: mobile light towers
+// round the building's foot and beside the pit, floodlights on the crane masts aimed at the roof,
+// spotlights on every Robot Gear pedestal, a headlamp on your hard hat and a soft glow around you
+// (tinted by the gear you wear). Real lights cost on every lit pixel, so each kind has a `tier`:
+// only tiers <= the preset's `nightLights` become real lights; the rest just glow (lamp heads,
+// halos and fake light beams). Intensities are candela (physically based, decay 2).
+export const NIGHT_LIGHTS = {
+  lens: '#fff1d6', // lamp head glass
+  beam: { color: '#fff3dc', opacity: 0.13 }, // fake volumetric beams
+  roof: { tier: 1, color: '#fff4e2', intensity: 3200, angle: 0.62, penumbra: 0.5, above: 15 }, // crane-mast floods, aimed at the roof
+  ground: { tier: 2, color: '#fff1d6', intensity: 1500, angle: 0.42, penumbra: 0.55, mast: 8.5, aimY: 14, out: 9 }, // light towers round the building (aimed at most aimY up the wall)
+  pit: { tier: 2, x: -80, z: 31, intensity: 1600, angle: 0.55, penumbra: 0.5, mast: 8.5 }, // a light tower over the Blocks pit
+  gear: { tier: 2, color: '#d8ecff', intensity: 1400, angle: 0.5, penumbra: 0.6, pole: 7 }, // Robot Gear hall pedestal spots
+  headlamp: { tier: 0, color: '#fff6e4', intensity: 90, angle: 0.48, penumbra: 0.55, distance: 40, pitch: 0.3, reach: 8 },
+  aura: { tier: 1, color: '#ffe3bf', intensity: 9, distance: 10, height: 3.2 }, // soft fill over you, gear glow colour when suited
+}
+
 // Default (fallback) character look, used only when player.glb cannot load.
 export const CHARACTER_COLORS = { skin: '#f2c79a', suit: '#2f6fd0', hair: '#4a2f1c' }
 
@@ -112,10 +129,11 @@ export const MATERIAL_PBR = {
 
 // --- Graphics presets, picked by the Bloxity graphics_quality setting ----------
 export const GRAPHICS_PRESETS = {
-  Low: { shadows: false, shadowMap: 512, antialias: false, dpr: 1, bloom: false, particles: 0.35 },
-  Medium: { shadows: true, shadowMap: 1024, antialias: false, dpr: 1.25, bloom: false, particles: 0.6 },
-  High: { shadows: true, shadowMap: 2048, antialias: true, dpr: 2, bloom: true, particles: 1 },
-  Ultra: { shadows: true, shadowMap: 4096, antialias: true, dpr: 2, bloom: true, particles: 1 },
+  // nightLights: which NIGHT_LIGHTS tiers become real lights (the rest only glow).
+  Low: { shadows: false, shadowMap: 512, antialias: false, dpr: 1, bloom: false, particles: 0.35, nightLights: 0 },
+  Medium: { shadows: true, shadowMap: 1024, antialias: false, dpr: 1.25, bloom: false, particles: 0.6, nightLights: 1 },
+  High: { shadows: true, shadowMap: 2048, antialias: true, dpr: 2, bloom: true, particles: 1, nightLights: 2 },
+  Ultra: { shadows: true, shadowMap: 4096, antialias: true, dpr: 2, bloom: true, particles: 1, nightLights: 2 },
 }
 
 // Bloom (postfx.js): only HDR-bright pixels (above threshold, linear, before
@@ -131,14 +149,14 @@ export const NEON = { k: 3.5, plainMax: 1.2 }
 // is a full-screen multi-pass blur, so it stays off on phones).
 export const COARSE_POINTER = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
 export const DEFAULT_GRAPHICS = COARSE_POINTER ? 'Medium' : 'High'
-export const MOBILE_GRAPHICS_CAP = { dpr: 1.5, shadowMap: 1024, particles: 0.6 }
+export const MOBILE_GRAPHICS_CAP = { dpr: 1.5, shadowMap: 1024, particles: 0.6, nightLights: 1 }
 
 // The preset to render with on this device.
 export function graphicsPreset(name) {
   const p = GRAPHICS_PRESETS[name] ?? GRAPHICS_PRESETS[DEFAULT_GRAPHICS]
   if (!COARSE_POINTER) return p
   const cap = MOBILE_GRAPHICS_CAP
-  return { ...p, dpr: Math.min(p.dpr, cap.dpr), shadowMap: Math.min(p.shadowMap, cap.shadowMap), bloom: false, particles: Math.min(p.particles, cap.particles) }
+  return { ...p, dpr: Math.min(p.dpr, cap.dpr), shadowMap: Math.min(p.shadowMap, cap.shadowMap), bloom: false, particles: Math.min(p.particles, cap.particles), nightLights: Math.min(p.nightLights, cap.nightLights) }
 }
 
 // --- Touch controls (touch.js) --------------------------------------------------
@@ -150,6 +168,7 @@ export const TOUCH = {
 
 // --- Camera (camera.js) -------------------------------------------------------
 export const CAMERA = {
+  shakeDecay: 6, // 1/s a camera shake (shakeCamera) dies away
   fov: 70,
   near: 0.1,
   far: 2400,
@@ -179,7 +198,36 @@ export const SETTINGS = {
   camera_sensitivity: { def: '1', type: 'number', min: 0.1, max: 5 },
   show_fps: { def: 'false', type: 'bool' },
   fullscreen: { def: 'false', type: 'bool' },
+  master_volume: { def: '100', type: 'number', min: 0, max: 100 }, // % of the game's own volume (AUDIO.volume)
+  enable_chat: { def: 'true', type: 'bool' }, // chat bubbles over the players' heads
 }
+
+// --- Game server (net.js, ../Build-the-skyscraper-backend) --------------------------------------
+// Built games never hold a socket URL: Bloxity's matchmaker picks the pod (bloxity.js
+// resolveServerEndpoint). Only the dev server (`npm run dev`) talks to a local backend.
+export const SERVER_URL = import.meta.env.DEV ? import.meta.env.VITE_SERVER_URL_DEV || 'ws://localhost:2567' : ''
+export const NET = {
+  saveEvery: 5, // s: progress goes to the server at most this often (and when the tab hides or closes)
+  loadTimeout: 12, // s the loading screen waits for the server's saved progress before playing on the browser save
+  retry: 2, // s before the first reconnect; doubles after each failed resolve/join...
+  retryMax: 30, // ...up to this
+  rejoin: 1, // s before joining again after the room closed
+  poseHz: 10, // pose messages per second (repeats are skipped)
+  buildEvery: 0.25, // s: blocks you place on the shared tower go up as one `build` message at most this often (backend: <= ~10/s)
+  avatarMax: 3000, // chars of the avatar JSON relayed to the others (backend AVATAR_MAX_LEN)
+}
+
+// --- Bloxity leaderboards (bloxity.js define(); backend src/boxityBoards.ts reports the scores) ----
+// Ids are permanent (lowercase a-z 0-9 _ -, max 32). The backend keeps the same ids/modes: blocks =
+// state.totalBlocks, the rest are the state fields of the same name (playtime in seconds).
+export const BLOXITY_BOARDS = [
+  { id: 'blocks', label: 'Most Blocks', order: 'desc', mode: 'best', format: 'compact', reset: 'none' },
+  { id: 'buildings', label: 'Most Buildings', order: 'desc', mode: 'best', format: 'number', reset: 'none' },
+  { id: 'strength', label: 'Most Strength', order: 'desc', mode: 'best', format: 'compact', reset: 'none' },
+  { id: 'speed', label: 'Most Speed', order: 'desc', mode: 'best', format: 'compact', reset: 'none' },
+  { id: 'cash', label: 'Most Cash', order: 'desc', mode: 'latest', format: 'compact', reset: 'none' },
+  { id: 'playtime', label: 'Most Playtime', order: 'desc', mode: 'best', format: 'time', reset: 'none' },
+]
 
 // The base rig, measured from player.glb: origin at the feet, 6.4 units tall at bind pose.
 export const RIG_HEIGHT = 6.4
@@ -247,6 +295,37 @@ export const ANIM = {
       ArmL2: { x: deg(20) }, ArmR2: { x: deg(20) }, Spine1: { x: deg(-4) },
     },
     velocityReference: 8, // m/s vertical speed that reads as fully rising / falling
+  },
+  // Parachute harness (activity 'chute'): hands up on the toggles; `flare` pulls them down for touchdown.
+  chute: {
+    hang: {
+      ArmL1: { x: deg(-150), z: deg(22) }, ArmR1: { x: deg(-150), z: deg(-22) },
+      ArmL2: { x: deg(38) }, ArmR2: { x: deg(38) },
+      LegL1: { x: deg(-18) }, LegR1: { x: deg(-8) }, LegL2: { x: deg(26) }, LegR2: { x: deg(34) },
+      Spine1: { x: deg(-6) },
+    },
+    flare: {
+      ArmL1: { x: deg(-62), z: deg(30) }, ArmR1: { x: deg(-62), z: deg(-30) },
+      ArmL2: { x: deg(70) }, ArmR2: { x: deg(70) },
+      LegL1: { x: deg(-48) }, LegR1: { x: deg(-44) }, LegL2: { x: deg(30) }, LegR2: { x: deg(34) },
+      Spine1: { x: deg(8) },
+    },
+    blend: 0.25, // s into the harness pose
+    swayRate: 0.55, // Hz the dangling legs swing
+    legSway: 0.12, // rad
+  },
+  // Robot Gear superhero landing (activity 'impact', input.impact 0..1): front knee up, back knee down,
+  // one fist on the ground, the other arm swept back; bobY drops the hips to kneel.
+  impact: {
+    pose: {
+      LegL1: { x: deg(-92), z: deg(-6) }, LegL2: { x: deg(98) },
+      LegR1: { x: deg(18), z: deg(8) }, LegR2: { x: deg(112) },
+      Spine1: { x: deg(28) }, Neck1: { x: deg(-24) },
+      ArmR1: { x: deg(-38), z: deg(-8) }, ArmR2: { x: deg(18) },
+      ArmL1: { x: deg(42), z: deg(52) }, ArmL2: { x: deg(28) },
+    },
+    bobY: -0.62,
+    blend: 0.05, // s into the crouch
   },
   landing: {
     duration: 0.16,
@@ -316,6 +395,9 @@ export const LAYOUT = {
   gym: { x0: 54, z: 8, spacing: 13, offset: 12, pad: 11 },
   upgrades: { x: 26, z: 40 },
   shop: { x: -26, z: 40 },
+  // Invite Friends kiosk (site.js, invite.js): on the same strip, between the central walkway (x -6..6)
+  // and the Upgrades kiosk (x 26), clear of the lamps along z 43.5 (x 0, 22).
+  invite: { x: 13, z: 40 },
   leaderboard: { x: 0, z: 76 },
   // Egg hall (eggs.js): a covered hall south of the road, entrance on its north side.
   eggs: { x: 56, z: 80 },
@@ -323,7 +405,7 @@ export const LAYOUT = {
   spin: { x: 84, z: 70 },
   // Robot Gear hall (robotGear.js): a T-shaped neon platform south-west of the leaderboard, entrance
   // from the main road at its north end; the bar of the T is at the far (south) end.
-  robot: { x: -52, z0: 57, hallW: 28, hallEnd: 90, barW: 52, barEnd: 107 },
+  robot: { x: -52, z0: 57, hallW: 28, hallEnd: 90, barW: 52, barEnd: 107, limited: { x: -30, z: 67, r: 4.6 }, showcase: { x: -73, z: 72, r: 5.2, gear: 'truck' } },
   roads: [
     // [x1, z1, x2, z2, width]
     [-126, 50, 126, 50, 10], // east-west road south of the plaza
@@ -366,28 +448,75 @@ export const INSIDE = {
   ride: 3.2, // s the express ride takes, whatever the height
   hutClear: 7.6, // m from the roof edge kept clear of the crown (the hut + a walkway)
 }
-// Building n (0-based) uses BUILDINGS[n % length] for its look and gets taller and
-// heavier each time: floors = floorsBase + n * floorsPer (max floorsMax); blocks per floor =
-// blocksBase * blockGrowth^n * (1 + floor * floorGrowth).
+// Top Builders finale (finale.js): a few seconds after a building is finished the camera
+// cuts to its top 3 builders (blocks placed on that building by the room's real players) on
+// glowing podiums on the roof, #3 first, then #2, then #1 (crowned), then a wide shot of all
+// three. Everyone watches (HUD hidden, you stand still or on your podium); SKIP ends it.
+export const FINALE = {
+  delay: 2.2, // s after the last block before the show starts (the crown pops first)
+  intro: 1.3, // s establishing swoop onto the roof
+  shot: 3, // s per close-up (#3, #2)
+  shotTop: 3.8, // s on the #1 builder
+  roll: 0.9, // s of snare roll at the start of each close-up before the name pops
+  wide: 3.6, // s of the closing wide shot
+  fov: 46,
+  spacing: 2.7, // m between the podiums
+  podium: { 1: 1.0, 2: 0.65, 3: 0.4 }, // podium height (m) per rank
+  podiumR: 1.15,
+  beam: 16, // m spotlight beam height above each podium
+  ranks: {
+    1: { color: '#ffc21a', rim: '#ffe27a', ink: '#ffb300' },
+    2: { color: '#c8b6ff', rim: '#efe8ff', ink: '#b9a2ff' },
+    3: { color: '#ff7a2a', rim: '#ffb37a', ink: '#ff6a1a' },
+  },
+}
+
+// Building n (0-based) gets taller and heavier each time: floors = floorsBase + n * floorsPer
+// (max floorsMax); blocks per floor = blocksBase * blockGrowth^n * (1 + floor * floorGrowth).
+// Its look is BUILDINGS[pickBuilding(n)] (tower.js): building 0 is always the first one, every
+// later one is a weighted roll on `chance` (seeded by n, so a reload keeps the same pick),
+// shown by the Next Building reel (nextBuilding.js). `rarity` is a NEXT_BUILDING.rarities key.
 export const BUILDING_SCALE = { floorsBase: 18, floorsPer: 6, floorsMax: 70, blocksBase: 220, blockGrowth: 2.15, floorGrowth: 0.05 }
 export const BUILDINGS = [
-  { name: 'Crystal Spire', shape: 'chamfer', size: 21, glass: '#3fd3e6', frame: '#e9f7ff', slab: '#ffffff', base: '#6b3fd1', crown: 'spire', lobby: { name: 'CRYSTAL LOUNGE', carpet: '#123a36', wall: '#16302c', accent: '#3fd3e6', wood: '#8a5a32', sofa: '#f4f1ea', lights: 'chandelier' } },
-  { name: 'Wave Towers', shape: 'blob', size: 24, glass: '#3f7ff0', frame: '#dfe9ff', slab: '#f4f7ff', base: '#2b3f8f', crown: 'dome', lobby: { name: 'WAVE LOUNGE', carpet: '#132447', wall: '#1a2a52', accent: '#5f9bff', wood: '#6b4a2e', sofa: '#eef2fb', lights: 'ring' } },
-  { name: 'Golden Hex', shape: 'hex', size: 22, glass: '#f0b43a', frame: '#fff4d6', slab: '#fff8ea', base: '#7a3d12', crown: 'spire', lobby: { name: 'GOLDEN HALL', carpet: '#4a1d14', wall: '#3a1a10', accent: '#f0b43a', wood: '#9a6a30', sofa: '#fff4dc', lights: 'chandelier' } },
-  { name: 'Emerald Round', shape: 'round', size: 20, glass: '#35d68a', frame: '#e6fff1', slab: '#ffffff', base: '#155e46', crown: 'ring', lobby: { name: 'EMERALD GARDEN', carpet: '#0f3a2a', wall: '#0f2e22', accent: '#35d68a', wood: '#7a5a34', sofa: '#f2fff6', lights: 'pendant' } },
-  { name: 'Ruby Cross', shape: 'cross', size: 23, glass: '#f0566f', frame: '#ffe6ea', slab: '#fff5f6', base: '#6d1424', crown: 'spire', lobby: { name: 'RUBY LOUNGE', carpet: '#3d0f18', wall: '#2e0b12', accent: '#f0566f', wood: '#5a2e22', sofa: '#fff0f2', lights: 'chandelier' } },
-  { name: 'Violet Star', shape: 'star', size: 24, glass: '#a45cff', frame: '#f1e6ff', slab: '#ffffff', base: '#341266', crown: 'dome', lobby: { name: 'STAR CLUB', carpet: '#221040', wall: '#1c0d35', accent: '#b77bff', wood: '#4a2e5a', sofa: '#f6efff', lights: 'ring' } },
+  { name: 'Crystal Spire', rarity: 'common', chance: 26, shape: 'chamfer', size: 21, glass: '#3fd3e6', frame: '#e9f7ff', slab: '#ffffff', base: '#6b3fd1', crown: 'spire', lobby: { name: 'CRYSTAL LOUNGE', carpet: '#123a36', wall: '#16302c', accent: '#3fd3e6', wood: '#8a5a32', sofa: '#f4f1ea', lights: 'chandelier' } },
+  { name: 'Wave Towers', rarity: 'common', chance: 22, shape: 'blob', size: 24, glass: '#3f7ff0', frame: '#dfe9ff', slab: '#f4f7ff', base: '#2b3f8f', crown: 'dome', lobby: { name: 'WAVE LOUNGE', carpet: '#132447', wall: '#1a2a52', accent: '#5f9bff', wood: '#6b4a2e', sofa: '#eef2fb', lights: 'ring' } },
+  { name: 'Golden Hex', rarity: 'rare', chance: 13, shape: 'hex', size: 22, glass: '#f0b43a', frame: '#fff4d6', slab: '#fff8ea', base: '#7a3d12', crown: 'spire', lobby: { name: 'GOLDEN HALL', carpet: '#4a1d14', wall: '#3a1a10', accent: '#f0b43a', wood: '#9a6a30', sofa: '#fff4dc', lights: 'chandelier' } },
+  { name: 'Emerald Round', rarity: 'uncommon', chance: 17, shape: 'round', size: 20, glass: '#35d68a', frame: '#e6fff1', slab: '#ffffff', base: '#155e46', crown: 'ring', lobby: { name: 'EMERALD GARDEN', carpet: '#0f3a2a', wall: '#0f2e22', accent: '#35d68a', wood: '#7a5a34', sofa: '#f2fff6', lights: 'pendant' } },
+  { name: 'Ruby Cross', rarity: 'rare', chance: 10, shape: 'cross', size: 23, glass: '#f0566f', frame: '#ffe6ea', slab: '#fff5f6', base: '#6d1424', crown: 'spire', lobby: { name: 'RUBY LOUNGE', carpet: '#3d0f18', wall: '#2e0b12', accent: '#f0566f', wood: '#5a2e22', sofa: '#fff0f2', lights: 'chandelier' } },
+  { name: 'Violet Star', rarity: 'epic', chance: 6.5, shape: 'star', size: 24, glass: '#a45cff', frame: '#f1e6ff', slab: '#ffffff', base: '#341266', crown: 'dome', lobby: { name: 'STAR CLUB', carpet: '#221040', wall: '#1c0d35', accent: '#b77bff', wood: '#4a2e5a', sofa: '#f6efff', lights: 'ring' } },
+  { name: 'Sapphire Needle', rarity: 'legendary', chance: 4, shape: 'round', size: 19, glass: '#2f6bff', frame: '#ffe9a8', slab: '#fff8e6', base: '#14245e', crown: 'spire', lobby: { name: 'SAPPHIRE SUITE', carpet: '#0f1a45', wall: '#101a3a', accent: '#ffd25a', wood: '#7a5226', sofa: '#fff6e0', lights: 'chandelier' } },
+  { name: 'Aurora Crown', rarity: 'mythic', chance: 1.5, shape: 'blob', size: 23, glass: '#ff5fd2', frame: '#fff0fb', slab: '#ffffff', base: '#4a0f4a', crown: 'ring', lobby: { name: 'AURORA CLUB', carpet: '#2a0d30', wall: '#240a2a', accent: '#ff7be0', wood: '#5a2e4a', sofa: '#fff0fa', lights: 'ring' } },
 ]
+// The Next Building reel (nextBuilding.js): when a finished building starts sinking, a dimmed
+// screen shows a vertical reel of buildings (portrait, name, chance) spinning past two arrows,
+// slowing down onto the next building; then its rarity pops above it over rotating rays with
+// confetti, and the new building rises once the reel closes (tower.js `hold`).
+// `bonus` multiplies TOWER.buildingBonus when that building is finished (cash only).
+export const NEXT_BUILDING = {
+  fadeIn: 0.45, // s the screen dims and the reel slides in
+  spin: 4.8, // s the reel spins (fast, then easing out onto the pick)
+  items: 30, // buildings the reel passes on the way
+  settle: 0.35, // s of the little overshoot-and-back at the end of the spin
+  hold: 2.9, // s the reveal stays up
+  fadeOut: 0.45, // s the screen clears
+  rarities: {
+    common: { name: 'COMMON', color: '#e9eef5', dark: '#6b7480', level: 0, bonus: 1 },
+    uncommon: { name: 'UNCOMMON', color: '#5fe36a', dark: '#1f8a2c', level: 1, bonus: 1.25 },
+    rare: { name: 'RARE', color: '#3ba7ff', dark: '#1b5fb8', level: 2, bonus: 1.5 },
+    epic: { name: 'EPIC', color: '#36e9ff', dark: '#0b7f9e', level: 3, bonus: 2 },
+    legendary: { name: 'LEGENDARY', color: '#ffc21a', dark: '#b86a00', level: 4, bonus: 3 },
+    mythic: { name: 'MYTHIC', color: '#ff4fd8', dark: '#8a1478', level: 5, bonus: 5 },
+  },
+}
 
 // --- Elevator + stairs (elevator.js, stairs.js) ------------------------------------------
 export const ELEVATOR = {
-  centerX: -11, // the double shaft: your cage east, the crew cage west
+  centerX: -11, // the double shaft: your cage east, an empty closed shaft west
   cage: 4.4, // cage width / depth
   mast: 1.3,
   board: 0.7, // s standing in the cage before the doors close
   baseSpeed: 9, // m/s at Elevator Speed level 0
   doors: 0.45, // s the doors take
-  botWait: 3.5, // s the crew cage waits at each end
 }
 // Switchback stair tower east of the shaft: one floor = two flights.
 export const STAIRS = { x0: 7, flight: 5.6, width: 2.2, landing: 2.4 }
@@ -407,13 +536,31 @@ export const STATS = {
 }
 
 // --- Upgrades (upgrade station + window) ---------------------------------------------
-// value(level) is what the upgrade does; price(level) is the cash for the NEXT level.
+// value(level) is what the upgrade does; price(level) is the cash for the NEXT level (cash only,
+// never Gems/Robux). fmt(value) is how the window shows it ("x1.25", "5%"), so a row reads
+// "before >> after". `color` tints the row, `id` doubles as the icon name in hudIcons.js.
+const fx = (v) => `x${(Math.round(v * 100) / 100).toFixed(2)}`
+const pct = (v) => `${Math.round(v * 10) / 10}%`
 export const UPGRADES = [
-  { id: 'grab', name: 'Block Grab', desc: 'Fill your bag faster in the pit', max: 25, value: (l) => 1 + l * 0.22, unit: 'x', price: (l) => Math.round(60 * Math.pow(1.55, l)) },
-  { id: 'build', name: 'Build Speed', desc: 'Place your blocks faster', max: 25, value: (l) => 1 + l * 0.22, unit: 'x', price: (l) => Math.round(80 * Math.pow(1.55, l)) },
-  { id: 'range', name: 'Build Range', desc: 'Build from further away', max: 20, value: (l) => 12 + l * 3.5, unit: 'm', price: (l) => Math.round(70 * Math.pow(1.6, l)) },
-  { id: 'lift', name: 'Elevator Speed', desc: 'Ride your elevator faster', max: 20, value: (l) => 9 * (1 + l * 0.3), unit: 'm/s', price: (l) => Math.round(90 * Math.pow(1.55, l)) },
+  { id: 'grab', name: 'Block Grab', desc: 'Fill your bag faster in the pit', color: 'blue', max: 25, value: (l) => 1 + l * 0.22, fmt: (v) => `${fx(v)} speed`, price: (l) => Math.round(85 * Math.pow(1.55, l)) },
+  { id: 'build', name: 'Build Speed', desc: 'Place blocks faster', color: 'green', max: 25, value: (l) => 1 + l * 0.22, fmt: (v) => `${fx(v)} speed`, price: (l) => Math.round(60 * Math.pow(1.55, l)) },
+  { id: 'range', name: 'Build Range', desc: 'Build from farther away', color: 'cyan', max: 20, value: (l) => 12 + l * 3.5, fmt: (v) => `${Math.round(v * 10) / 10} m`, price: (l) => Math.round(50 * Math.pow(1.6, l)) },
+  { id: 'lift', name: 'Elevator Speed', desc: 'Ride the elevator faster', color: 'yellow', max: 20, value: (l) => 9 * (1 + l * 0.3), fmt: (v) => `${fx(v / 9)} speed`, price: (l) => Math.round(100 * Math.pow(1.55, l)) },
+  // Lucky drops: every block you place has a Fortune Luck % chance to drop coins, Golden Touch
+  // sets how many coins (each worth LUCKY.coinValue x your cash multiplier).
+  { id: 'golden', name: 'Golden Touch', desc: 'More coins in every lucky drop', color: 'yellow', max: 10, value: (l) => 3 + l, fmt: (v) => `${v} coins`, price: (l) => Math.round(100 * Math.pow(1.7, l)) },
+  { id: 'fortune', name: 'Fortune Luck', desc: 'Blocks drop coins more often', color: 'green', max: 15, value: (l) => 5 + l, fmt: (v) => pct(v), price: (l) => Math.round(100 * Math.pow(1.6, l)) },
+  // Combo: keep placing and your cash multiplier climbs up to this value (see COMBO).
+  { id: 'combo', name: 'Coin Combo', desc: 'Keep placing blocks: cash builds up', color: 'orange', max: 12, value: (l) => 1 + l * 0.25, fmt: (v) => fx(v), price: (l) => Math.round(25000 * Math.pow(1.8, l)) },
+  { id: 'trowel', name: 'Wide Trowel', desc: 'More blocks with every placement', color: 'blue', max: 10, value: (l) => 1 + l * 0.5, fmt: (v) => fx(v), price: (l) => Math.round(190000 * Math.pow(1.9, l)) },
+  { id: 'hands', name: 'Lightning Hands', desc: 'Place even faster (stacks with Build Speed)', color: 'orange', max: 10, value: (l) => 1 + l * 0.1, fmt: (v) => `${Math.round((v - 1) * 100)}% faster`, price: (l) => Math.round(190000 * Math.pow(1.9, l)) },
 ]
+// Lucky drops (Fortune Luck / Golden Touch): one coin is worth coinValue x cashMultiplier().
+export const LUCKY = { coinValue: 1.5 }
+// Coin Combo: while you keep placing blocks the combo fills over `ramp` s of building (from
+// x1 up to the upgrade's value); it holds for `grace` s after you stop, then drains `drain`x as
+// fast as it filled.
+export const COMBO = { ramp: 20, grace: 3, drain: 3 }
 
 // --- Gym (gym.js, gymKit.js) -------------------------------------------------------------------
 // Each pad has a bench press (Strength) and a treadmill (Speed). `need` = buildings finished
@@ -571,6 +718,11 @@ export const PET = {
     { name: 'Rainbow', mult: 6 },
   ],
   luck: 2, // Lucky Eggs pass: Epic and Legendary odds x this
+  // The Pets window's +1 SLOT: extra slots bought one at a time with cash (never gems), on top of the pass.
+  extraSlots: [150000, 750000, 4000000],
+  // SELL: a pet pays its egg's price x this share by rarity level (common..limited) x its tier's mult.
+  sell: [0.1, 0.2, 0.4, 0.8, 2, 1],
+  sellLimited: 50000, // egg price used for pets that do not come from an egg (the spin wheel's Mech)
   near: { x: 3.6, z: 4 }, // half-size (m) of the box on the carpet beside a pedestal where its egg panel shows
   hatchTime: 1.25, // s the eggs rock before they crack (auto hatch: autoTime)
   autoTime: 0.55,
@@ -637,49 +789,130 @@ export const SPIN = {
 // `ability` (key G / the touch gear button): 'transform' (robot <-> vehicle), 'fly' (transform into
 // a jet; hold Jump to climb), 'drop' (a dropship delivers the armor with a ground slam and a timed
 // build boost).
-// `scale` = how much bigger the wearer gets (the mech suits are walking machines), `fly` = hold Jump
+// `size` = full suits are a giant robot this many times the player (the player pilots it, unscaled),
+// `fly` = hold Jump
 // to fly in robot form ({ climb, sink } m/s).
 // `slot` = where the pedestal stands: hall rows by the walkway (side -1 west / 1 east), or the bar.
 export const ROBOT_GEAR = [
   { id: 'jetboots', name: 'Jet Boots', price: 25000, blocks: 1.5, build: 2, walk: 10, capacity: 25, color: '#ff9a1a', glow: '#3bd9ff', row: 0, side: -1, fly: { climb: 8, sink: -2.2 } },
   { id: 'gauntlets', name: 'Robot Gauntlets', price: 50000, blocks: 2, build: 1.75, walk: 15, capacity: 50, color: '#ffc21a', glow: '#ff7a1a', row: 0, side: 1 },
   { id: 'arms', name: 'Robotic Arms', price: 100000, blocks: 2, build: 2, walk: 20, capacity: 200, color: '#e8ecf2', glow: '#ffc21a', row: 1, side: -1 },
-  { id: 'mech', name: 'Mech Suit', price: 2500000, blocks: 2.5, build: 2.5, walk: 30, capacity: 750, color: '#ffb81a', glow: '#3bd9ff', row: 1, side: 1, scale: 1.45 },
-  { id: 'blackmech', name: 'Black Mech Suit', price: 7500000, blocks: 3, build: 3, walk: 45, capacity: 1250, color: '#25272e', glow: '#3bd9ff', bar: 0, scale: 1.5, fly: { climb: 11, sink: -3 } },
-  { id: 'mixer', name: 'Mixer Transformer', price: 10000000, blocks: 4, build: 4, walk: 60, capacity: 1600, color: '#2f6fd0', glow: '#ff9a3b', bar: 1, ability: 'transform', vehicle: 'mixer', scale: 1.35 },
-  { id: 'titan', name: 'Titan Armor', price: 50000000, blocks: 8, build: 7, walk: 100, capacity: 3000, color: '#d61f2c', glow: '#ffd23a', bar: 2, ability: 'drop', scale: 1.25, fly: { climb: 14, sink: -3 } },
-  { id: 'truck', name: 'Truck Transformer', price: 20000000, blocks: 5, build: 5, walk: 75, capacity: 2000, color: '#7a3dd1', glow: '#ff5fd2', bar: 3, ability: 'transform', vehicle: 'truck', scale: 1.35 },
-  { id: 'jet', name: 'Jet Transformer', price: 30000000, blocks: 6, build: 6, walk: 90, capacity: 2000, color: '#f2f4f7', glow: '#ffc21a', bar: 4, ability: 'fly', vehicle: 'jet', scale: 1.3 },
+  { id: 'mech', name: 'Mech Suit', price: 2500000, blocks: 2.5, build: 2.5, walk: 30, capacity: 750, color: '#ffb81a', glow: '#3bd9ff', row: 1, side: 1, size: 2 },
+  { id: 'blackmech', name: 'Black Mech Suit', price: 7500000, blocks: 3, build: 3, walk: 45, capacity: 1250, color: '#25272e', glow: '#3bd9ff', bar: 0, size: 2, fly: { climb: 11, sink: -3 } },
+  { id: 'mixer', name: 'Mixer Transformer', price: 10000000, blocks: 4, build: 4, walk: 60, capacity: 1600, color: '#2f6fd0', glow: '#ff9a3b', bar: 1, ability: 'transform', vehicle: 'mixer', size: 2 },
+  { id: 'titan', name: 'Titan Armor', price: 50000000, blocks: 8, build: 7, walk: 100, capacity: 3000, color: '#d61f2c', glow: '#ffd23a', bar: 2, ability: 'drop', size: 2, fly: { climb: 14, sink: -3 } },
+  { id: 'truck', name: 'Truck Transformer', price: 20000000, blocks: 5, build: 5, walk: 75, capacity: 2000, color: '#7a3dd1', glow: '#ff5fd2', bar: 3, ability: 'transform', vehicle: 'truck', size: 2 },
+  { id: 'jet', name: 'Jet Transformer', price: 30000000, blocks: 6, build: 6, walk: 90, capacity: 2000, color: '#f2f4f7', glow: '#ffc21a', bar: 4, ability: 'fly', vehicle: 'jet', size: 2 },
+  // LIMITED (on its own red pad outside the hall): stock counts down through each `hours` window from
+  // `stock` toward `floor` and restocks when the window ends; `was` is the struck-out list price.
+  { id: 'spider', name: 'Spider Arms', price: 1000000, was: 1500000, blocks: 3, build: 3, walk: 40, capacity: 600, color: '#f2f4f7', glow: '#ff3a4a', spot: 'limited', limited: { stock: 1000, hours: 72, floor: 30 }, carry: true, climb: true },
 ]
 export const ROBOT = {
   maxWalk: 55, // m/s cap on walk speed with gear
   vehicleSpeed: 1.45, // walk speed multiplier in vehicle form
   vehicleScale: { mixer: 0.55, truck: 0.55, jet: 0.5 },
-  transformTime: 0.55, // s robot <-> vehicle
+  transformTime: 1.1, // s robot -> vehicle (built piece by piece out of the robot)
+  foldTime: 0.9, // s vehicle -> robot
+  // Driving / walking physics (robotPlayer.js): springs on the body's pitch / roll / heave.
+  spring: { k: 90, damp: 11, pitchPerAccel: 0.012, rollPerLateral: 0.006, steer: 0.35, maxSteer: 0.5, flyLean: 0.025, maxFlyLean: 0.55 },
   fly: { climb: 14, sink: -3.5, accel: 28, maxY: 260 }, // m/s while flying as a jet (hold Jump to climb)
   flyAccel: 26, // m/s^2 toward the climb / sink speed for gear that flies in robot form
   flyMaxY: 240, // m, flying gear stops climbing here
   trail: 0.045, // s between thruster spark bursts
-  stride: 2.4, // m walked per heavy mech footstep (x body scale)
+  stride: 2.4, // m walked per heavy mech footstep (x suit size)
   drop: { cooldown: 45, boost: 2, boostTime: 20, fallTime: 1.1, hover: 2.2 }, // Titan Armor's G
   suitUp: 1.4, // s the equip assembly takes
+  // Gear with `carry` lifts the player off the ground on its legs (theirs hang still); gear with
+  // `climb` scales the tower: walk into a wall to latch on, forward / back climbs, Jump kicks off,
+  // reaching the roof hauls you over the edge.
+  carry: { lift: 0.95, bob: 0.08 }, // m
+  climb: { speed: 10, reach: 1.7, detach: 2.6, mantleAt: 0.6, mantleTime: 0.8, inward: 2.2, gait: 1.6 },
+  // Parachute (parachute.js): a player NOT wearing Robot Gear opens a ram-air canopy when they drop off
+  // something high (the tower roof); gear wearers land on their shock absorbers instead (`impact`). It opens once the ground is `deployAlt` m away, or earlier when
+  // falling so fast it needs more room to slow down (stopping distance at `decel` + `margin`), and
+  // only after a free fall that began at least `minDrop` m up. Under it you sink at `sink` m/s, fly
+  // forward at `glide` (steer with the move keys, up to `speed`), and flare to `flareSink` in the last
+  // `flareAlt` m. m, m/s, m/s^2, s.
+  chute: {
+    minDrop: 14, deployAlt: 26, minAlt: 4, margin: 15, triggerVy: -9, decel: 55,
+    sink: 4.2, glide: 6, speed: 13, flareAlt: 3.4, flareSink: 1.4,
+    pack: 0.22, inflate: 0.8, collapse: 1.25, cells: 9, span: 7.4, chord: 2.5, lines: 4.8,
+    color: '#e8322f', glow: '#ffd23a', // canopy panels (alternating with white) and the glowing trim
+  },
+  // Robot Gear wearers dropping from high take the hit (impact.js): landing faster than `minVy` m/s is a
+  // superhero landing (knee down, fist to the ground) whose effects grow up to `minVy + range`. The crouch
+  // comes in over `down` s, holds `hold` (+ `holdExtra` at full power) while the legs absorb the shock
+  // (walk slowed to `slow`x), then the suit rises over `rise` s.
+  impact: { minVy: 16, range: 30, down: 0.07, hold: 0.38, holdExtra: 0.25, rise: 0.45, slow: 0.15 },
 }
 
-// --- Free gift + daily rewards ------------------------------------------------------------------
-export const GIFT = { every: 8 * 60 } // s of play between free gifts
-export const DAILY = [
-  { cash: 250 },
-  { cash: 600 },
-  { strength: 150 },
-  { cash: 1500 },
-  { speed: 120 },
-  { cash: 4000 },
-  { cash: 10000, strength: 500 },
-]
+// --- Daily, Playtime + Free rewards (rewards.js, rewardsUi.js) ------------------------------------------
+// Server-authoritative for signed-in players (backend rewards.ts; DAILY_DAYS / PLAY_TIERS_MIN there must
+// match `daily.length` / `play[].at`), kept in the browser save for guests. Prizes (`kind`):
+// cash { amount }, boost { stat: 'cash' | 'strength' | 'speed', mult, time (min of play) }, gear { gear } (a
+// ROBOT_GEAR id; owned already -> `dupeGear` of its price in cash), egg { egg } (one free hatch of an EGGS
+// egg; full storage -> its price in cash). `color` = the card: blue, purple, gold, red, rainbow.
+export const REWARDS = {
+  // One claim per UTC day, in a row; missing a day starts over at day 1.
+  daily: [
+    { kind: 'boost', stat: 'strength', mult: 2, time: 15, color: 'blue' },
+    { kind: 'gear', gear: 'arms', color: 'blue' },
+    { kind: 'boost', stat: 'strength', mult: 4, time: 30, color: 'blue' },
+    { kind: 'gear', gear: 'gauntlets', color: 'purple' },
+    { kind: 'cash', amount: 17000, color: 'purple' },
+    { kind: 'boost', stat: 'strength', mult: 2, time: 180, color: 'gold' },
+    { kind: 'gear', gear: 'mech', color: 'rainbow', wide: true },
+  ],
+  // Minutes played today (UTC), each claimable once a day.
+  play: [
+    { at: 1, kind: 'cash', amount: 500, color: 'blue' },
+    { at: 3, kind: 'gear', gear: 'jetboots', color: 'blue' },
+    { at: 5, kind: 'cash', amount: 1500, color: 'blue' },
+    { at: 15, kind: 'gear', gear: 'gauntlets', color: 'gold' },
+    { at: 20, kind: 'egg', egg: 'steel', color: 'purple' },
+    { at: 25, kind: 'boost', stat: 'cash', mult: 2, time: 10, color: 'purple' },
+    { at: 30, kind: 'boost', stat: 'cash', mult: 3, time: 15, color: 'gold' },
+    { at: 45, kind: 'boost', stat: 'strength', mult: 5, time: 10, color: 'red' },
+  ],
+  // The FREE button's card: once ever, after the three steps.
+  free: { kind: 'boost', stat: 'cash', mult: 1.5, time: 15, color: 'purple' },
+  freeSteps: ['Join the group', 'Favorite the game', 'Like the game'],
+  dupeGear: 0.5,
+  timedMax: 12, // running timed boosts kept at once
+}
 
-// --- Crew (playing with friends) ----------------------------------------------------------------
-// Workers you add to your crew (E next to one) each add `bonus` cash, up to `max` of them.
-export const CREW = { bonus: 0.1, max: 5, radius: 4.5 }
+// --- Offline rewards: "While You Were Away" (offline.js, offlineUi.js) -----------------------------------
+// Closing the game keeps you training. The SERVER measures the time away (backend src/offline.ts;
+// `min` / `max` here must match OFFLINE_MIN_S / OFFLINE_MAX_S there; guests are timed by their browser):
+// under `min` seconds earns nothing, at most `max` (24 h) is ever paid. `perMinute` = Strength and Speed
+// per minute away at the Free pad (x1); it is multiplied by the best gym pad you can use and by your
+// 2x passes and pets, but NOT by world events or running boosts. Never Gems/Robux.
+export const OFFLINE = { min: 300, max: 86400, perMinute: 0.07, localKey: 'build-the-skyscraper.away' }
+
+// --- Invite Friends (invite.js; backend src/invite.ts decides who counts) --------------------------------
+// A friend counts for the player who invited them once they ACTUALLY PLAY: `need` of play and blocks
+// placed (keep in step with the backend constants.ts INVITE_ACTIVE_PLAYTIME / INVITE_ACTIVE_BLOCKS).
+// `tiers[].friends` mirrors the backend INVITE_TIERS. A `prize` is one prize or a list, in the REWARDS
+// shapes (cash / boost / gear / egg, granted by stats.grantReward) plus { kind: 'upgrade', id, levels }
+// (id 'all' = every upgrade; capped at each upgrade's max). `scale: true` on cash = x (1 + buildings
+// finished * SPIN.scale), like the spin wheel, so a prize keeps up with the economy late in the game.
+// Never Gems/Robux. Value reference: a spin $15K, Jet Boots $25K, Gauntlets $50K, Steel Egg $100K,
+// Black Mech $7.5M (the daily week already ends on the Mech Suit, so invites top out one step above it).
+export const INVITE = {
+  need: { playtime: 180, blocks: 300 },
+  tiers: [
+    { friends: 1, color: 'blue', prize: { kind: 'cash', amount: 5000, scale: true } },
+    { friends: 2, color: 'blue', prize: { kind: 'boost', stat: 'cash', mult: 2, time: 15 } },
+    { friends: 3, color: 'purple', prize: [{ kind: 'upgrade', id: 'grab', levels: 2 }, { kind: 'upgrade', id: 'build', levels: 2 }] },
+    { friends: 5, color: 'purple', prize: { kind: 'egg', egg: 'brick' } },
+    { friends: 8, color: 'gold', prize: { kind: 'gear', gear: 'gauntlets' } },
+    { friends: 12, color: 'gold', prize: [{ kind: 'boost', stat: 'strength', mult: 3, time: 30 }, { kind: 'cash', amount: 75000, scale: true }] },
+    { friends: 20, color: 'red', prize: [{ kind: 'egg', egg: 'steel' }, { kind: 'upgrade', id: 'all', levels: 3 }] },
+    { friends: 25, color: 'rainbow', prize: { kind: 'gear', gear: 'blackmech' } },
+  ],
+  // The invited friend's gift (claim "welcome"), ready as soon as they join through an invite.
+  welcome: [{ kind: 'cash', amount: 2500, scale: true }, { kind: 'boost', stat: 'cash', mult: 2, time: 10 }],
+}
 
 // --- World events (events.js) -------------------------------------------------------------------
 export const EVENTS = {
@@ -691,12 +924,6 @@ export const EVENTS = {
     { id: 'build', name: 'TURBO BUILD', desc: '2x build + grab speed', color: '#3bc8ff', build: 2 },
     { id: 'void', name: 'VOID STORM', desc: '2x cash and gym gains', color: '#b45cff', cash: 2, gym: 2 },
   ],
-}
-
-// --- Crew workers (bots.js): the rest of the "server", building the same tower -------------------
-export const BOTS = {
-  names: ['BrickByBrick_77', 'sandy_hardhat', 'CraneQueen', 'mortar_mike', 'ToweringTina', 'rebar_rex', 'SkyHook99'],
-  walkSpeed: [7.5, 11], // m/s
 }
 
 // --- Audio (audio/core.js) -------------------------------------------------------------------------
