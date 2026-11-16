@@ -28,7 +28,7 @@ import { mulberry32, paintConcrete, paintWindows, toTexture } from './textures.j
 // floors are one InstancedMesh (slab band + curtain-wall glass), the roof is a concrete cap
 // with a glowing green edge, and the floor in progress shows as stone blocks popping onto
 // the roof, filling it from the elevator side outward. Collision: a trimesh prism up to
-// the roof plus an invisible parapet with gaps at the elevator and stair exits.
+// the roof (no parapet: the edge is open on every side).
 // When the last floor is done the crown goes on and the building stays open for
 // INSIDE.time: its two lowest floors turn into a lobby with a doorway on the south face
 // (lobby.js furnishes it), then it sinks into the sand and the next one starts.
@@ -184,22 +184,8 @@ export function createTower(scene, saved) {
     } else if (floors > 0) {
       trimesh(prismTrimesh(pts, 0, y, C.x, C.z))
     }
-    if (floors > 0) {
-      // Parapet: an invisible wall round the roof edge, open at the exits.
-      const H = 2.4
-      for (let i = 0; i < pts.length; i++) {
-        const [ax, az] = pts[i]
-        const [bx, bz] = pts[(i + 1) % pts.length]
-        const mx = (ax + bx) / 2
-        const mz = (az + bz) / 2
-        if (anchors.exits.some((e) => Math.hypot(mx - e.x, mz - e.z) < e.r)) continue
-        const len = Math.hypot(bx - ax, bz - az)
-        const yaw = Math.atan2(-(bz - az), bx - ax)
-        colliders.push(
-          addFixed(RAPIER.ColliderDesc.cuboid(len / 2 + 0.15, H / 2, 0.15), { x: C.x + mx, y: y + H / 2, z: C.z + mz }, { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }),
-        )
-      }
-    }
+    // No parapet: the roof edge is open on every side, so players can step off anywhere
+    // and drop to the ground (parachute / landing handle the fall).
   }
 
   // --- Building swap ------------------------------------------------------------------------

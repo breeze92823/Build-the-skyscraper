@@ -122,7 +122,24 @@ export function createHud() {
   const bNight = btn('hud-mini', ICONS.moon, 'daynight')
   bNight.title = 'Skip time of day (N)'
   small.append(bSound, bNight)
-  right.append(rank, grid, small)
+  // Phones: the menu buttons fold away behind one toggle (hud.css hides it on big screens, where the
+  // grid is always visible). Picking a button closes the menu again.
+  const bMore = el('button', 'hud-more', `<span class="hb-icon">${ICONS.menu}</span><span class="hb-label hud-txt">MENU</span><span class="hb-badge" hidden></span>`)
+  const moreBadge = bMore.querySelector('.hb-badge')
+  bMore.type = 'button'
+  bMore.setAttribute('aria-expanded', 'false')
+  bMore.setAttribute('aria-label', 'Show menu buttons')
+  const setMenuOpen = (open) => {
+    right.classList.toggle('menu-open', open)
+    bMore.setAttribute('aria-expanded', String(open))
+    bMore.querySelector('.hb-icon').innerHTML = open ? ICONS.close : ICONS.menu
+    bMore.querySelector('.hb-label').textContent = open ? 'CLOSE' : 'MENU'
+  }
+  bMore.addEventListener('click', () => setMenuOpen(!right.classList.contains('menu-open')))
+  grid.addEventListener('click', (e) => {
+    if (e.target.closest('.hud-btn')) setMenuOpen(false)
+  })
+  right.append(rank, bMore, grid, small)
 
   // --- Bottom: status card, keys, gym lift button --------------------------------------------------------
   const status = el('div', 'hud-status', '<div class="st-tag">AUTO</div><div class="st-body"><div class="st-title"></div><div class="st-sub"></div></div>')
@@ -258,6 +275,8 @@ export function createHud() {
       bDaily.querySelector('.hb-badge').hidden = !s.dailyReady
       bGift.querySelector('.hb-badge').hidden = true
       drawTimed(s.timed)
+      // The MENU toggle shows a "!" while a folded-away button has something waiting.
+      moreBadge.hidden = right.classList.contains('menu-open') || !(s.freeReady || s.dailyReady || s.spins)
       spinBadge.hidden = !s.spins
       setText('spins', spinBadge, s.spins > 99 ? '99+' : String(s.spins ?? 0))
       if (last.muted !== s.muted) {

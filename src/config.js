@@ -43,7 +43,7 @@ export const PLAYER_DIMS = { radius: 0.75, height: 1.8 } // capsule the characte
 
 // --- Look ------------------------------------------------------------------
 export const RENDER = { exposure: 1.0 }
-export const FOG = { near: 220, far: 900 }
+export const FOG = { near: 40, far: 125 } // fully fogged just before CAMERA.far (130), so the cut-off is hidden
 // The two lighting moods lighting.js blends between (key N toggles).
 export const TIME_OF_DAY = {
   transition: 2.5, // s to blend day <-> night
@@ -171,7 +171,7 @@ export const CAMERA = {
   shakeDecay: 6, // 1/s a camera shake (shakeCamera) dies away
   fov: 70,
   near: 0.1,
-  far: 2400,
+  far: 130, // short on purpose; the sky dome, stars and clouds are pinned to the far plane (lighting.js pinToFarPlane) so they still show
   startPitch: 0.38, // radians above the horizon (looking down a little on the site)
   minPitch: -0.35,
   maxPitch: 1.25,
@@ -423,7 +423,6 @@ export const TOWER = {
   foundation: 0.4, // concrete pad the first floor stands on (walkable step)
   cell: 2.2, // roof grid cell for placed blocks
   block: 1.9, // placed block size
-  roofEdge: 1.1, // invisible parapet height at the roof edge (gaps at the exits)
   floorBonus: 12, // cash x floor number to the player when a floor they helped on completes
   buildingBonus: 2500, // cash x building number when a tower is finished
   celebrate: 9, // s the finished tower stands before it is cleared away

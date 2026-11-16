@@ -25,6 +25,7 @@ import {
 import { COMPOUND, DESERT } from './config.js'
 import { RAPIER, addFixed } from './physics.js'
 import { bake } from './bake.js'
+import { pinToFarPlane } from './lighting.js'
 import { mulberry32, paintDuneSand, paintStrata, paintWaterNormal, toTexture } from './textures.js'
 
 // The desert around the construction site: one big rippled-sand ground whose dunes
@@ -284,7 +285,10 @@ function makeClouds() {
   }
   const baked = bake(group, false)
   baked.traverse((o) => {
-    if (o.isMesh) o.material.fog = false
+    if (o.isMesh) {
+      o.material.fog = false
+      pinToFarPlane(o.material, 'pinFarClouds') // visible at any camera far plane
+    }
   })
   return baked
 }
