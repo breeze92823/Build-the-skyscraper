@@ -850,7 +850,7 @@ export const SPIN = {
 export const ROBOT_GEAR = [
   { id: 'jetboots', name: 'Jet Boots', price: 25000, blocks: 1.5, build: 2, walk: 10, capacity: 25, color: '#ff9a1a', glow: '#3bd9ff', row: 0, side: -1, fly: { climb: 8, sink: -2.2 } },
   { id: 'gauntlets', name: 'Robot Gauntlets', price: 75000, blocks: 2, build: 1.75, walk: 15, capacity: 50, color: '#ffc21a', glow: '#ff7a1a', row: 0, side: 1 },
-  { id: 'arms', name: 'Robotic Arms', price: 300000, blocks: 2, build: 2, walk: 20, capacity: 200, color: '#e8ecf2', glow: '#ffc21a', row: 1, side: -1 },
+  { id: 'arms', name: 'Robotic Arms', price: 300000, blocks: 2, build: 2, walk: 20, capacity: 200, color: '#e8ecf2', glow: '#ffc21a', row: 1, side: -1, carry: true, climb: true },
   { id: 'mech', name: 'Mech Suit', price: 25e6, blocks: 2.5, build: 2.5, walk: 30, capacity: 750, color: '#ffb81a', glow: '#3bd9ff', row: 1, side: 1, size: 2 },
   { id: 'blackmech', name: 'Black Mech Suit', price: 250e6, blocks: 3, build: 3, walk: 45, capacity: 1250, color: '#25272e', glow: '#3bd9ff', bar: 0, size: 2, fly: { climb: 11, sink: -3 } },
   { id: 'mixer', name: 'Mixer Transformer', price: 1.5e9, blocks: 4, build: 4, walk: 60, capacity: 1600, color: '#2f6fd0', glow: '#ff9a3b', bar: 1, ability: 'transform', vehicle: 'mixer', size: 2 },
