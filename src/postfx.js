@@ -55,5 +55,10 @@ export function createPostFx(renderer, scene, camera) {
       if (enabled && composer) composer.render()
       else renderer.render(scene, camera)
     },
+    // Where the scene itself is drawn (the bloom chain's HDR buffer, or null = the canvas). Shaders are
+    // compiled per target (tone mapping + colour space differ), so warmup.js compiles against this one.
+    sceneTarget() {
+      return enabled && composer ? composer.readBuffer : null
+    },
   }
 }

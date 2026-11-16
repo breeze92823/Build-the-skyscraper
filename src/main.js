@@ -55,6 +55,7 @@ import * as net from './net.js'
 import { ICONS } from './hudIcons.js'
 import { pointInPolygon } from './shapes.js'
 import * as S from './stats.js'
+import { createWarmup } from './warmup.js'
 
 const { state } = S
 // Your credit on the tower (the finale's Top Builders, tower.contributors()).
@@ -227,14 +228,6 @@ createPlayerBody()
 resetPlayer(SPAWN, SPAWN_FACING)
 syncYawToPlayer()
 
-// Compile every shader up front, behind the loading screen (on some GPUs the first frame
-// otherwise stalls for seconds while dozens of programs compile).
-bloxity.loadingStep('Preparing graphics')
-try {
-  await renderer.compileAsync(scene, camera)
-} catch {
-  // Older drivers: they compile on first use instead.
-}
 
 // --- Player avatar --------------------------------------------------------------------------------------
 const playerGroup = new Group()
@@ -759,6 +752,13 @@ const back = new Vector3()
 const backTarget = () => back
 let lastNight = -1
 
+// Every shader, texture and mesh buffer goes to the GPU now, behind the loading screen, once the whole
+// world exists (warmup.js); otherwise each one stalls the frame it first comes into view. While playing,
+// warmup.update() warms whatever is added later (gear, pets, other players, the next building) in idle time.
+bloxity.loadingStep('Preparing graphics')
+const warmup = createWarmup(renderer, scene, camera, postfx)
+await warmup.full()
+
 // A thrown error must never stop the loop (three.js stops requesting frames when the
 // callback throws): log it once per second and keep going.
 let lastErrorAt = -1
@@ -1093,6 +1093,7 @@ function frame() {
   lighting.update(dt, playerGroup.position)
   nightLights.update(dt, { group: playerGroup, avatar, facing: player.facing, gearOn: state.gear.on })
   postfx.render()
+  warmup.update(dt)
 
   // Save.
   saveT += dt
