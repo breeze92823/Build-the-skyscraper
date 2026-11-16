@@ -389,14 +389,29 @@ const spinWin = createSpinWindow({
   },
 })
 
+const boosted = { key: '', blocks: 0 } // instant blocks bought on the floor in progress (buyBoost)
 function buyBoost(i, node) {
   const b = SHOP.boosts[i]
   if (tower.phase !== 'building') {
     say('This building is finished! Wait for the next one.', false)
     return false
   }
-  if (!S.spend(b.price)) {
-    say(`Need $${S.short(b.price - state.cash)} more!`, false)
+  // Boosts fill at most SHOP.boostShare of any one floor between them (and never past the floor in progress), so
+  // cash never rushes a building, and cost only for the blocks they place.
+  const p = tower.progress()
+  const key = `${tower.spec.n}:${p.floor}`
+  if (boosted.key !== key) {
+    boosted.key = key
+    boosted.blocks = 0
+  }
+  const fit = Math.min(b.blocks, tower.roomLeft(), Math.floor(p.floorNeed * SHOP.boostShare) - boosted.blocks)
+  if (fit <= 0) {
+    say('Boosts are used up on this floor. Build the rest by hand!', false)
+    return false
+  }
+  const price = Math.ceil((b.price * fit) / b.blocks)
+  if (!S.spend(price)) {
+    say(`Need $${S.short(price - state.cash)} more!`, false)
     hud.shake('boost')
     if (node) node.classList.add('shake')
     sfx.deny()
@@ -406,7 +421,8 @@ function buyBoost(i, node) {
   // inside addBlocks, and those events check these flags.
   helpedBuilding = true
   helpedFloor = true
-  const taken = tower.addBlocks(b.blocks, meWho)
+  const taken = tower.addBlocks(fit, meWho)
+  boosted.blocks += taken
   if (taken > 0) {
     S.placedBlocks(taken, { pay: false })
     trackRate(taken)
@@ -1256,7 +1272,16 @@ if (import.meta.env.DEV) {
     // Plays the Next Building reel for building n (default: the next one) without touching the tower.
     reel: (n) => nextReel.show(n ?? tower.spec.n + 1),
     // Finish the building yourself (credited to you): the Top Builders finale follows.
-    finish: () => tower.addBlocks(1e15, meWho),
+    // Fills floor after floor as you (one placement fills at most one floor; shared: the floor in progress).
+    finish: () => {
+      let took = 0
+      for (let i = 0; i < 1000 && tower.phase === 'building'; i++) {
+        const k = tower.addBlocks(1e15, meWho)
+        if (!(k > 0)) break
+        took += k
+      }
+      return took
+    },
     finale,
     spins: (n = 10) => S.addSpins('normal', n),
     pet: (id, tier = 0) => S.addPet(id, tier, { force: true }),
