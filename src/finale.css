@@ -1,0 +1,305 @@
+/* Top Builders finale (finale.js): letterbox bars, name cards over the builders, SKIP. */
+body.finale-on .hud,
+body.finale-on .touch-root,
+body.finale-on .ix-prompt,
+body.finale-on .egp {
+  visibility: hidden !important;
+}
+
+.fin {
+  --bar: clamp(48px, 11dvh, 108px);
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+  font-family: 'Fredoka', system-ui, sans-serif;
+  color: #fff;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.fin[hidden] {
+  display: none;
+}
+
+/* --- Letterbox -------------------------------------------------------------------------------- */
+.fin-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: #000;
+  transition: transform 0.55s cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+.fin-top {
+  top: 0;
+  height: calc(var(--bar) + var(--safe-t));
+  padding-top: var(--safe-t);
+  box-sizing: border-box;
+  transform: translateY(-101%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1em;
+}
+.fin-bot {
+  bottom: 0;
+  height: calc(var(--bar) + var(--safe-b));
+  padding: 0 calc(16px + var(--safe-r)) var(--safe-b) calc(16px + var(--safe-l));
+  box-sizing: border-box;
+  transform: translateY(101%);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  column-gap: 12px;
+}
+.fin.on .fin-top,
+.fin.on .fin-bot {
+  transform: none;
+}
+.fin.out .fin-top,
+.fin.out .fin-bot {
+  transition-duration: 0.45s;
+}
+
+.fin-title {
+  font-weight: 700;
+  font-size: clamp(22px, 5.6vh, 56px);
+  line-height: 1;
+  letter-spacing: 0.01em;
+  transform: skewX(-8deg);
+  background: linear-gradient(180deg, #ffe25a 0%, #ffb31a 55%, #ff8a00 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0.05em 0 #6a2c00) drop-shadow(0 0 0.35em rgba(255, 170, 30, 0.35));
+}
+.fin-sub {
+  font-weight: 600;
+  font-size: clamp(10px, 1.7vh, 16px);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #ffe7b0;
+  opacity: 0.85;
+}
+
+.fin-msg {
+  grid-column: 2;
+  text-align: center;
+  min-width: 0;
+}
+.fin-watch {
+  font-weight: 700;
+  font-size: clamp(15px, 3.3vh, 32px);
+  white-space: nowrap;
+}
+.fin-watch b {
+  display: inline-block;
+  min-width: 2.2em;
+  text-align: left;
+  margin-left: 0.3em;
+  color: #ffd23a;
+}
+.fin-you {
+  margin-top: 0.15em;
+  font-weight: 600;
+  font-size: clamp(11px, 1.9vh, 18px);
+  color: #b9b4c8;
+}
+.fin-skip {
+  grid-column: 3;
+  justify-self: end;
+  pointer-events: auto;
+  touch-action: manipulation;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  min-height: 44px;
+  padding: 0 clamp(18px, 2.6vw, 40px);
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  font: 700 clamp(14px, 2.3vh, 22px) / 1 'Fredoka', system-ui, sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+.fin-skip svg {
+  width: 1.45em;
+  height: 0.85em;
+  fill: currentColor;
+}
+.fin-skip:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.fin-skip:active {
+  transform: scale(0.95);
+}
+
+/* Narrow screens: text on the left, SKIP on the right. */
+@media (max-width: 640px) {
+  .fin-bot {
+    grid-template-columns: 1fr auto;
+  }
+  .fin-msg {
+    grid-column: 1;
+    text-align: left;
+  }
+  .fin-watch {
+    white-space: normal;
+  }
+  .fin-skip {
+    grid-column: 2;
+  }
+}
+
+/* --- Name cards ----------------------------------------------------------------------------------- */
+.fin-cards {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.fin-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  opacity: 0;
+  visibility: hidden;
+  transform-origin: 50% 100%;
+  font-size: clamp(15px, min(4.2vh, 4.4vw), 46px);
+  will-change: transform;
+}
+.fin-card.show {
+  opacity: 1;
+  visibility: visible;
+}
+.fin-card.r1 {
+  --c: #ffc21a;
+  --ink: linear-gradient(180deg, #fff1a0, #ffc21a 55%, #ff9500);
+  --num: #ffb300;
+}
+.fin-card.r2 {
+  --c: #c8b6ff;
+  --ink: linear-gradient(180deg, #ffffff, #d9ccff 55%, #a88cff);
+  --num: #b9a2ff;
+}
+.fin-card.r3 {
+  --c: #ff7a2a;
+  --ink: linear-gradient(180deg, #ffd0a0, #ff8a3a 55%, #ff4d1a);
+  --num: #ff6a1a;
+}
+.fc-in {
+  position: relative;
+  padding: 0.55em 1.5em 0.35em 1.1em;
+  border: 0.13em solid var(--c);
+  border-radius: 0.6em 2.2em 2.2em 0.6em;
+  background: linear-gradient(100deg, rgba(14, 10, 32, 0.78), rgba(28, 18, 60, 0.55));
+  box-shadow: 0 0 0.9em color-mix(in srgb, var(--c) 45%, transparent), inset 0 0 0.8em color-mix(in srgb, var(--c) 18%, transparent);
+  white-space: nowrap;
+  line-height: 1.05;
+}
+.fin-card.r1 .fc-in {
+  box-shadow: 0 0 1.4em color-mix(in srgb, var(--c) 70%, transparent), inset 0 0 1em color-mix(in srgb, var(--c) 25%, transparent);
+}
+.fin-card.mine .fc-in {
+  border-style: solid;
+  outline: 0.06em dashed rgba(125, 255, 107, 0.8);
+  outline-offset: 0.18em;
+}
+.fc-rank {
+  position: absolute;
+  left: 0.75em;
+  top: -0.95em;
+  font-weight: 700;
+  font-size: 1.35em;
+  line-height: 1;
+  transform: skewX(-6deg);
+  background: var(--ink);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0.04em 0.06em 0 #2a0f00) drop-shadow(-0.03em -0.03em 0 #2a0f00);
+}
+.fc-name {
+  font-weight: 700;
+  font-size: 1.1em;
+  max-width: 13em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #fff;
+  text-shadow: 0 0.06em 0 #1b1030, 0.05em 0 0 #1b1030, -0.05em 0 0 #1b1030, 0 -0.04em 0 #1b1030;
+}
+.fin-card.r2 .fc-name {
+  color: #f1e9ff;
+}
+.fc-blocks {
+  font-weight: 700;
+  font-size: 0.82em;
+  margin-top: 0.08em;
+  background: var(--ink);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0.05em 0 #2a0f00);
+}
+.fc-you {
+  position: absolute;
+  right: -0.35em;
+  top: -0.65em;
+  padding: 0.14em 0.55em;
+  border-radius: 1em;
+  background: #7dff6b;
+  color: #0b2a05;
+  font-weight: 700;
+  font-size: 0.5em;
+  letter-spacing: 0.06em;
+  box-shadow: 0 0.1em 0 #2f9a20;
+}
+.fc-in.pop {
+  animation: finPop 0.55s cubic-bezier(0.2, 1.5, 0.4, 1) both;
+}
+@keyframes finPop {
+  0% {
+    transform: scale(0.2) translateY(0.6em);
+    opacity: 0;
+    filter: brightness(2.4);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+    filter: none;
+  }
+}
+
+/* #1 reveal flash. */
+.fin-flash {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 45%, rgba(255, 244, 200, 0.9), rgba(255, 200, 80, 0.35) 45%, transparent 75%);
+  opacity: 0;
+}
+.fin-flash.go {
+  animation: finFlash 0.7s ease-out;
+}
+@keyframes finFlash {
+  0% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fc-in.pop,
+  .fin-flash.go {
+    animation: none;
+  }
+}

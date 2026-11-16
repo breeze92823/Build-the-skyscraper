@@ -1,5 +1,5 @@
 import { ACESFilmicToneMapping, BoxGeometry, Clock, ConeGeometry, Group, Mesh, PCFSoftShadowMap, PerspectiveCamera, Scene, SRGBColorSpace, Vector3, WebGLRenderer } from 'three'
-import { CAMERA, CREW, ELEVATOR, GIFT, GYM, INSIDE, LAYOUT, RANKS, SAVE, SHOP, SPAWN, SPAWN_FACING, SPIN, TOWER, graphicsPreset, RENDER } from './config.js'
+import { AUDIO, CAMERA, ELEVATOR, GYM, INSIDE, LAYOUT, NEXT_BUILDING, RANKS, SAVE, SHOP, SPAWN, SPAWN_FACING, SPIN, TOWER, graphicsPreset, RENDER } from './config.js'
 import * as bloxity from './bloxity.js'
 import { install as installInput, inputState, onKey } from './input.js'
 import { installTouch } from './touch.js'
@@ -8,6 +8,7 @@ import { setCameraSensitivity, syncYawToPlayer, update as updateCamera } from '.
 import { onModeChanged, toggleMode } from './modes.js'
 import { bodyCount, initPhysics, stepPhysics } from './physics.js'
 import { createLighting } from './lighting.js'
+import { createNightLights } from './nightLights.js'
 import { createWorld, groundColliders } from './world.js'
 import { createPostFx } from './postfx.js'
 import { neon, setNeonBloom } from './propkit.js'
@@ -29,22 +30,40 @@ import { createEggHall } from './eggs.js'
 import { createSpinStage } from './spin.js'
 import { createPetFollowers } from './pets.js'
 import { createPets } from './petUi.js'
+import { initRewards, tickRewards } from './rewards.js'
+import { initOffline } from './offline.js'
+import { createOfflineUi } from './offlineUi.js'
+import { createRewardsUi } from './rewardsUi.js'
+import { createInvite } from './invite.js'
 import { createSpinWindow } from './spinUi.js'
 import { createFx } from './fx.js'
-import { createBots } from './bots.js'
+import { createFinale } from './finale.js'
+import { createRemotePlayers } from './remotePlayers.js'
+import { createEmotes } from './emotes.js'
+import { createChatBubbles } from './chatBubbles.js'
 import { dressWorker, makeNameTag } from './characters.js'
 import { createInteract } from './interact.js'
 import { createHud } from './hud.js'
+import { createNextBuilding } from './nextBuilding.js'
+import { prewarmThumbs } from './towerThumbs.js'
 import { createWindows } from './windows.js'
 import { closeTopWindow, anyWindowOpen, setWindowReserved } from './uiWindow.js'
 import { createDayNight, createEvents } from './cycles.js'
 import { createEmitter, setParticleDensity, updateParticles } from './particles.js'
-import { game, installAudio, isMuted, sfx, toggleMuted, updateAudio } from './audio/index.js'
+import { game, installAudio, isMuted, setAdMuted, setVolume, sfx, toggleMuted, updateAudio } from './audio/index.js'
+import * as net from './net.js'
 import { ICONS } from './hudIcons.js'
 import { pointInPolygon } from './shapes.js'
 import * as S from './stats.js'
 
 const { state } = S
+// Your credit on the tower (the finale's Top Builders, tower.contributors()).
+const meWho = {
+  id: 'me',
+  get name() {
+    return myName()
+  },
+}
 
 // Boot order: Bloxity SDK -> renderer -> Rapier (async wasm) -> saved progress -> desert,
 // compound, tower and everything on it -> player body -> avatar (async, swaps in when ready)
@@ -57,6 +76,7 @@ let fx = null
 function applySetting(key, value) {
   if (key === 'camera_sensitivity') setCameraSensitivity(value)
   else if (key === 'fullscreen') bloxity.requestFullscreen(value)
+  else if (key === 'master_volume') setVolume((AUDIO.volume * value) / 100) // the portal's master slider scales the game's own level
   else if (key === 'graphics_quality' && renderer) {
     const next = graphicsPreset(value)
     renderer.shadowMap.enabled = next.shadows
@@ -71,6 +91,18 @@ function applySetting(key, value) {
 }
 bloxity.onSetting(applySetting)
 bloxity.init()
+// An ad break (Boxity's interstitial / rewarded ad) pauses the world and silences it until it ends.
+let adPaused = false
+bloxity.onAdBreak(
+  () => {
+    adPaused = true
+    setAdMuted(true)
+  },
+  () => {
+    adPaused = false
+    setAdMuted(false)
+  },
+)
 
 // --- Renderer ---------------------------------------------------------------------------------
 const preset = graphicsPreset(bloxity.settings.graphics_quality)
@@ -105,6 +137,11 @@ resize()
 bloxity.loadingStep('Starting physics')
 await initPhysics()
 S.load()
+// Progress: signed-in players' lives on the server. Connect now and wait (behind the loading screen)
+// for it, so the world below is built from the right save; with no server it plays on the browser save.
+bloxity.loadingStep('Connecting')
+net.initNet()
+await net.whenLoaded()
 
 bloxity.loadingStep('Building the site')
 lighting = createLighting(scene, renderer, preset)
@@ -112,7 +149,15 @@ const world = createWorld(scene)
 groundColliders()
 const site = buildSite(scene, lighting)
 const pit = createPit(scene)
-const tower = createTower(scene, state.tower)
+// One tower per room, owned by the server: built from the room's tower when connected (tower.sync keeps it
+// in step every frame, below), else from your own save and played locally.
+const tower = createTower(scene, net.towerState() ?? state.tower)
+tower.setReporter(net.sendBuild) // the blocks you place go up as `build` (batched by net.js)
+net.onBuilt(({ n, builders }) => {
+  // The finished building's top builders for the finale; you are 'me' there (it highlights that id).
+  const mine = (id) => id === net.mySessionId() || (!!net.myUid() && net.normId(id) === net.myUid())
+  tower.setBuilders(n, (Array.isArray(builders) ? builders : []).map((b) => ({ id: mine(b.id) ? 'me' : String(b.id), name: String(b.name ?? ''), blocks: Number(b.blocks) || 0 })))
+})
 const elevator = createElevator(scene, tower, {
   liftSpeed: S.liftSpeed,
   onRide(what, dir) {
@@ -127,7 +172,10 @@ fx.setScale(preset.particles)
 const gym = createGym(scene, fx)
 gym.refresh(state.buildings, state.gymOwned)
 const board = createLeaderboard(scene)
+net.setLeaderboardHandler(board.setRemote) // the server's top players on the wall
 const robotHall = createRobotHall(scene)
+// Construction floodlights, gear-hall spotlights and your headlamp after dark.
+const nightLights = createNightLights({ scene, lighting, tower, cranes, hall: robotHall, preset })
 const hall = createEggHall(scene)
 const spinStage = createSpinStage(scene)
 const followers = createPetFollowers(scene)
@@ -140,7 +188,6 @@ const lobby = createLobby(scene, tower, {
     else game.liftArrive()
   },
 })
-const bots = createBots(scene, { tower, elevator, pit, gym, fx, lobby })
 const dayNight = createDayNight(lighting)
 const events = createEvents()
 
@@ -227,6 +274,8 @@ scene.add(tag.sprite)
 
 // --- HUD, windows, prompts ---------------------------------------------------------------------------------
 const hud = createHud()
+const nextReel = createNextBuilding()
+prewarmThumbs()
 bloxity.onReservedAreas((areas) => {
   hud.setReserved(areas)
   setWindowReserved(areas)
@@ -236,8 +285,70 @@ const windows = createWindows({ hud, say, onBoost: buyBoost })
 const interact = createInteract()
 lobby.attach(interact)
 // Robot Gear: pedestal prompts, suit-up, G ability (transform / fly / Titan dropship).
-const robots = createRobotPlayer({ scene, hall: robotHall, interact, hud, fx, say, player, playerGroup, getAvatar: () => avatar, popAtPlayer })
+const robots = createRobotPlayer({ scene, hall: robotHall, tower, interact, hud, fx, say, player, playerGroup, getAvatar: () => avatar, popAtPlayer })
 const pets = createPets({ hall, say, openShop: (id) => windows.openShopAt(id) })
+// Daily & Playtime + Free rewards (server-authoritative for signed-in players: rewards.js).
+initRewards()
+const rewardsUi = createRewardsUi({ say, pets })
+// While You Were Away: Strength + Speed for the time you were gone (the server times it for signed-in players).
+initOffline()
+const offlineUi = createOfflineUi({ say })
+// Invite Friends (the plaza kiosk): friends who actually play earn rewards; the server decides who counts.
+const invite = createInvite({ say, pets })
+// Other players from the server roster (net.js), our Boxity emotes (relayed to them) and the chat
+// bubbles Boxity's chat shows over everyone's head. All of it is inert offline / without the SDK.
+const remotes = createRemotePlayers(scene, { fx, impactFx: robots.impactFx })
+const emotes = createEmotes({
+  getAnimator: () => animator,
+  // An emote stops as soon as you move, jump, ride or train.
+  isBusy: () => !!training || lobby.riding || player.locked || !player.grounded || Math.hypot(player.velocity.x, player.velocity.z) > 0.8,
+})
+// Top Builders finale: after a building is finished its top 3 builders stand on podiums on the
+// roof while the camera visits each of them (finale.js). You are frozen in place for it, or
+// stand on your own podium, and put back afterwards.
+let finaleHold = null // where you were before the finale: { x, y, z, facing, moved }
+const finale = createFinale({
+  scene,
+  camera,
+  tower,
+  fx,
+  me: {
+    name: myName,
+    animator: () => animator,
+    headY: () => 2.05 * robots.bodyScale(),
+    // spot { x, y, z, facing } = your podium, null = just stand still. False while riding.
+    stage(spot) {
+      if (finaleHold) return true
+      if (training) stopTraining()
+      if (player.locked || lobby.riding) return false
+      const p = player.position
+      finaleHold = { x: p.x, y: p.y, z: p.z, facing: player.facing, moved: !!spot }
+      if (spot) resetPlayer(spot, spot.facing)
+      player.locked = true
+      player.hold = spot ? { x: spot.x, y: spot.y, z: spot.z } : { x: p.x, y: p.y, z: p.z }
+      return true
+    },
+    release() {
+      const h = finaleHold
+      finaleHold = null
+      if (!h) return
+      player.locked = false
+      player.hold = null
+      // Back where you were (unless the building is already clearing everyone off).
+      if (h.moved && tower.phase === 'celebrate') resetPlayer(h, h.facing)
+      syncYawToPlayer()
+    },
+  },
+  onStart() {
+    for (let i = 0; i < 6 && anyWindowOpen(); i++) closeTopWindow()
+  },
+})
+const bubbles = createChatBubbles(scene, {
+  remotes,
+  getLocalPos: () => player.renderPosition,
+  getLocalScale: () => robots.bodyScale(),
+  isLocalVisible: () => playerGroup.visible && !lobby.riding,
+})
 const spinWin = createSpinWindow({
   say,
   onSpin(kind, index, offset) {
@@ -263,7 +374,7 @@ function buyBoost(i, node) {
   // inside addBlocks, and those events check these flags.
   helpedBuilding = true
   helpedFloor = true
-  const taken = tower.addBlocks(b.blocks)
+  const taken = tower.addBlocks(b.blocks, meWho)
   if (taken > 0) {
     S.placedBlocks(taken, { pay: false })
     trackRate(taken)
@@ -281,12 +392,12 @@ hud.on('upgrades', () => windows.upgrades.open())
 hud.on('ranks', () => windows.ranks.open())
 hud.on('pets', () => pets.windows.pets.open())
 hud.on('spin', () => spinWin.open())
-hud.on('daily', () => windows.daily.open())
+hud.on('daily', () => rewardsUi.open())
 hud.on('pass', (id) => {
   if (state.passes[id]) say('You already own this!', true)
   windows.shop.open()
 })
-hud.on('gift', () => claimGift())
+hud.on('gift', () => rewardsUi.openFree())
 hud.on('sound', () => toggleMuted())
 hud.on('daynight', () => {
   dayNight.skip()
@@ -297,6 +408,7 @@ hud.on('stop', () => stopTraining())
 
 interact.add({ x: site.kiosks.upgrades.pad.x, z: site.kiosks.upgrades.pad.z, y: 1.6, r: 4.5, info: () => ({ title: 'Upgrade Station', verb: 'Open Upgrades' }), run: () => windows.upgrades.open() })
 interact.add({ x: site.kiosks.shop.pad.x, z: site.kiosks.shop.pad.z, y: 1.6, r: 4.5, info: () => ({ title: 'Shop', verb: 'Open Shop' }), run: () => windows.shop.open() })
+interact.add({ x: site.kiosks.invite.pad.x, z: site.kiosks.invite.pad.z, y: 1.6, r: 4.5, info: () => ({ title: 'Invite Friends', verb: invite.ready() ? 'Claim your invite rewards!' : 'Invite friends, earn rewards' }), run: () => invite.open() })
 // Egg hall: the Pet Merge machine. Spin stage: the wheel.
 interact.add({ x: hall.merge.x, z: hall.merge.z, y: 1.6, r: 3.4, info: () => ({ title: 'Pet Merge', verb: 'Merge 5 pets into a Golden one' }), run: () => pets.windows.merge.open() })
 interact.add({
@@ -340,35 +452,10 @@ for (const st of gym.stations) {
   })
 }
 
-// Crew: add the nearest worker to your crew.
-let crewBot = null
-interact.add({
-  x: () => crewBot?.pos.x ?? 0,
-  y: () => (crewBot?.pos.y ?? 0) + 1.6,
-  z: () => crewBot?.pos.z ?? 0,
-  r: CREW.radius,
-  info() {
-    if (!crewBot) return null
-    const inCrew = state.crew.includes(crewBot.name)
-    if (inCrew) return { title: crewBot.name, verb: 'In your crew', off: true }
-    if (state.crew.length >= CREW.max) return { title: crewBot.name, verb: `Crew full (${CREW.max})`, off: true }
-    return { title: crewBot.name, verb: 'Add to crew (+10% cash)' }
-  },
-  run() {
-    if (!crewBot || state.crew.includes(crewBot.name) || state.crew.length >= CREW.max) return
-    state.crew.push(crewBot.name)
-    S.emit('crew', crewBot.name)
-    sfx.unlock()
-    say(`${crewBot.name} joined your crew! +10% cash`, true)
-    fx.sparks(crewBot.pos.x, crewBot.pos.y + 2, crewBot.pos.z, { count: 40, colors: ['#7dff6b', '#ffffff'], speed: 6 })
-  },
-})
-
 // --- Gym training ------------------------------------------------------------------------------------------
 let training = null // { st, repT, reps }
 function startTraining(st) {
   if (training || player.locked) return
-  if (st.occupant && st.occupant !== 'player') bots.evict(st)
   st.occupant = 'player'
   training = { st, repT: 0 }
   const pose = st.kind === 'strength' ? st.lie : st.stand
@@ -476,23 +563,26 @@ tower.on('floor', ({ floor, of, done }) => {
 let fireworks = 0
 tower.on('complete', ({ n, name }) => {
   game.buildingDone()
-  setTimeout(() => {
+  finale.queue() // the Top Builders show; the toasts below wait for it
+  finale.after(() => {
     if (tower.lobby) hud.banner(`GO INSIDE! ${INSIDE.mult}X STRENGTH & SPEED`, '#7dff6b', 3.2)
-  }, 4200)
+  }, 2200)
   fireworks = TOWER.celebrate - 1
   if (helpedBuilding) {
     state.buildings++
     S.emit('buildings', 1)
-    const bonus = Math.round((n + 1) * TOWER.buildingBonus * S.cashMultiplier())
+    // Rarer buildings (the Next Building reel) pay a bigger finishing bonus.
+    const rarityBonus = NEXT_BUILDING.rarities[tower.spec.def.rarity]?.bonus ?? 1
+    const bonus = Math.round((n + 1) * TOWER.buildingBonus * rarityBonus * S.cashMultiplier())
     S.addCash(bonus)
-    say(`${name} finished! +1 Building, +$${S.short(bonus)}`, true)
+    finale.after(() => say(`${name} finished! +1 Building, +$${S.short(bonus)}`, true), 300)
     hud.bump('buildings')
     const next = GYM.tiers.find((t) => t.need === state.buildings)
-    if (next) setTimeout(() => say(`New gym pad unlocked: ${next.label}!`, true), 2600)
+    if (next) finale.after(() => say(`New gym pad unlocked: ${next.label}!`, true), 2900)
     // Every building you helped finish is a free spin (and the wheel's cash prizes grow).
     S.addSpins('normal', SPIN.perBuilding)
     spinStage.repaint(SPIN.normal)
-    setTimeout(() => say(`+${SPIN.perBuilding} FREE spin! Open the Spin Wheel`, true), next ? 5200 : 2600)
+    finale.after(() => say(`+${SPIN.perBuilding} FREE spin! Open the Spin Wheel`, true), next ? 5500 : 2900)
   }
 })
 let wasSinking = false
@@ -500,6 +590,9 @@ tower.on('height', () => {
   if (tower.sinking && !wasSinking) {
     wasSinking = true
     game.rumble()
+    // The party is over: the Next Building reel picks the next one, which rises when it closes.
+    const show = nextReel.show(tower.spec.n + 1)
+    tower.hold(show - TOWER.sinkTime - NEXT_BUILDING.fadeOut * 0.5)
     const C = tower.center
     for (let i = 0; i < 10; i++) {
       const a = (i / 10) * Math.PI * 2
@@ -521,9 +614,13 @@ tower.on('building', () => {
   helpedBuilding = false
   helpedFloor = false
   roofBefore = tower.roofY
-  hud.banner(`NEW BUILDING: ${tower.spec.def.name.toUpperCase()}`, '#3fd3ff', 3.5)
+  // The building the reel picked rises: a burst in its rarity's colour.
+  const rar = NEXT_BUILDING.rarities[tower.spec.def.rarity] ?? NEXT_BUILDING.rarities.common
+  hud.banner(`NEW BUILDING: ${tower.spec.def.name.toUpperCase()}`, rar.color, 3.5)
   const C = tower.center
-  fx.sparks(C.x, 2, C.z, { count: 120, speed: 14, colors: ['#3fd3ff', '#ffffff'], size: 0.8, spread: tower.spec.size * 0.7 })
+  fx.sparks(C.x, 2, C.z, { count: 120 + rar.level * 30, speed: 14, colors: [rar.color, '#ffffff', tower.spec.def.glass], size: 0.8, spread: tower.spec.size * 0.7 })
+  fx.ring(C.x, 0.4, C.z, tower.spec.size * 0.5, tower.spec.size * 2.2, rar.color, 1.2)
+  if (rar.level >= 2) fx.confetti(C.x, 6, C.z, 60 + rar.level * 30, tower.spec.size * 0.8)
 })
 
 // --- Stat events -------------------------------------------------------------------------------------------------
@@ -540,7 +637,10 @@ S.on('rankUp', (i) => {
 })
 let windowsDirty = false
 S.on('cash', () => (windowsDirty = true))
-S.on('upgrade', () => windows.refresh())
+S.on('upgrade', (id) => {
+  windows.refresh()
+  game.upgrade(id)
+})
 S.on('pass', () => windows.refresh())
 S.on('pets', () => followers.sync(equippedPets()))
 S.on('spins', () => spinWin.refresh())
@@ -551,32 +651,6 @@ events.on((ev) => {
     sfx.unlock()
   } else say('The event is over.', true)
 })
-
-// --- Gift ----------------------------------------------------------------------------------------------------------
-function claimGift() {
-  if (state.giftIn > 0) {
-    say(`Free gift in ${S.clock(state.giftIn)}`, false)
-    return
-  }
-  const r = Math.random()
-  let reward
-  if (r < 0.5) {
-    const n = Math.round(300 + state.totalBlocks * 0.15 + state.cash * 0.05)
-    S.addCash(n)
-    reward = { icon: ICONS.cash, text: `+$${S.short(n)} Cash!` }
-  } else if (r < 0.75) {
-    const n = Math.round(40 + state.strength * 0.12)
-    S.addStat('strength', n)
-    reward = { icon: ICONS.strength, text: `+${S.short(n)} Strength!` }
-  } else {
-    const n = Math.round(30 + state.speed * 0.12)
-    S.addStat('speed', n)
-    reward = { icon: ICONS.speed, text: `+${S.short(n)} Speed!` }
-  }
-  state.giftIn = GIFT.every
-  sfx.gift?.('cash')
-  windows.showGift(reward)
-}
 
 // --- Helpers ---------------------------------------------------------------------------------------------------------
 const screen = new Vector3()
@@ -601,12 +675,24 @@ function blocksPerMinute() {
   return (sum / span) * 60
 }
 
+// Fortune Luck / Golden Touch: a lucky drop pays its coins as cash, with a burst and a floating number.
+function luckyDrop(drop) {
+  if (!drop) return
+  S.addCash(drop.cash)
+  popAtPlayer(`LUCKY! +$${S.short(drop.cash)}`, '#ffd23a', true)
+  const p = player.renderPosition
+  fx.sparks(p.x, p.y + 2.2, p.z, { count: 14 + Math.min(30, drop.coins * 2), colors: ['#ffd23a', '#fff2a8', '#ffffff'], speed: 5 })
+  game.lucky(drop.coins)
+}
+
 // --- Loop ----------------------------------------------------------------------------------------------------------------
 const clock = new Clock()
 let shownLoading = true
 let readySince = 0
 let collectAcc = 0
 let buildAcc = 0
+let lastComboTier = 0
+let placeCarry = 0 // fraction of a block left over from the Wide Trowel multiplier
 let flyT = 0
 let popAcc = 0
 let popT = 0
@@ -636,6 +722,14 @@ function statPopNearPlayer(kind, n) {
   const y = ((1 - screen.y) / 2) * window.innerHeight + (Math.random() * 2 - 1) * spread * 0.5
   hud.statPop(x, y, kind, `+${S.short(n)}`)
 }
+// What the others see of you: pose, rank + strength (name tag, bulk) and the worn gear (net.js sends them).
+net.setPresenceSources({
+  pose: () => {
+    const p = player.renderPosition
+    return { x: p.x, y: p.y, z: p.z, yaw: player.facing, speed: Math.hypot(player.velocity.x, player.velocity.z), act: training?.st.kind === 'strength' ? 'bench' : robots.poseAct() }
+  },
+  presence: () => ({ rank: S.rankIndex(), strength: state.strength, gear: state.gear.on || '' }),
+})
 let saveT = 0
 let refreshT = 0
 const back = new Vector3()
@@ -656,9 +750,19 @@ renderer.setAnimationLoop(() => {
 
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.1)
+  if (adPaused) {
+    postfx.render() // keep the picture, freeze the game until the ad break ends
+    return
+  }
   const elapsed = clock.elapsedTime
   elapsedTotal = elapsed
   state.playtime += dt
+  S.tickTimed(dt)
+  tickRewards(dt, () => {
+    sfx.rewardReady()
+    say('A playtime reward is ready! Open DAILY to claim it.', true)
+  })
+  rewardsUi.update(dt)
 
   player.walkSpeed = S.walkSpeed() * robots.speedMul()
   // Moving while on a machine gets you off it.
@@ -685,18 +789,25 @@ function frame() {
     }
   }
   playerGroup.rotation.set(benching ? -Math.PI / 2 : 0, player.facing, 0)
+  // Spider Arms carry the player: the legs hang still while the arms walk and climb.
+  const carried = robots.legsIdle()
   animator?.update(dt, {
-    grounded: player.grounded,
-    speed: training && !benching ? 9 : Math.hypot(player.velocity.x, player.velocity.z),
-    verticalVelocity: player.velocity.y,
+    grounded: player.grounded || carried,
+    speed: carried ? 0 : training && !benching ? 9 : Math.hypot(player.velocity.x, player.velocity.z),
+    verticalVelocity: carried ? 0 : player.velocity.y,
     turn: 0,
-    activity: benching ? 'bench' : null,
+    activity: benching ? 'bench' : robots.chuting() ? 'chute' : robots.impactDepth() > 0 ? 'impact' : null,
+    flare: robots.chuteFlare(),
+    impact: robots.impactDepth(),
     rep,
   })
   back.set(p.x - Math.sin(player.facing) * 0.35, p.y + 1.3, p.z - Math.cos(player.facing) * 0.35)
   tag.sprite.position.set(p.x, p.y + (benching ? 0.9 : 2.5 * robots.bodyScale()), p.z)
   tag.set(myName(), S.rankIndex())
-  tag.sprite.visible = !lobby.riding // in the cab the camera is right behind your head
+  tag.sprite.visible = !lobby.riding && !finale.active // in the cab the camera is right behind your head; the finale shows cards
+  if (!finale.active) emotes.update() // the finale plays its own pose on your avatar
+  bubbles.update()
+  remotes.update(dt, elapsed, p)
 
   // --- Collect in the pit.
   const cap = S.capacity()
@@ -735,12 +846,18 @@ function frame() {
       if (buildAcc >= 1) {
         const n = Math.min(state.bag, Math.floor(buildAcc))
         buildAcc -= n
-        // Robot Gear: every block from the bag places gearBlocks() blocks.
-        const mult = S.gearBlocks()
-        const took = tower.addBlocks(Math.round(n * mult))
+        // Robot Gear and Wide Trowel: every block from the bag places `mult` blocks (the
+        // fraction, e.g. x1.5, carries over to the next placement).
+        const mult = S.gearBlocks() * S.trowelMul()
+        const want = n * mult + placeCarry
+        const whole = Math.floor(want)
+        placeCarry = want - whole
+        const took = tower.addBlocks(whole, meWho)
         if (took > 0) {
+          if (took < whole) placeCarry = 0
           S.setBag(state.bag - Math.min(n, Math.max(1, Math.ceil(took / mult))))
           S.placedBlocks(took)
+          luckyDrop(S.rollLucky(took))
           helpedFloor = true
           helpedBuilding = true
           trackRate(took)
@@ -752,9 +869,20 @@ function frame() {
         flyT = 0.1
         fx.flyBlock(back, tmpV.copy(front.pos).setY(front.pos.y + 0.6), 0.38, 1.6)
         game.place()
+        game.placeWide(S.trowelMul())
+        if (S.upgradeValue('hands') > 1) game.handsZap()
       }
     } else buildStatus = 'far'
-  } else buildAcc = 0
+  } else {
+    buildAcc = 0
+    placeCarry = 0
+  }
+  S.tickCombo(dt, buildStatus === 'build')
+  // Coin Combo: a rising tick for every quarter of the bar, a fanfare at the top, a drop when it runs out.
+  const comboTier = S.comboMax() > 1 ? Math.floor(S.comboFill() * 4 + 1e-6) : 0
+  if (comboTier > lastComboTier) game.comboStep(comboTier, comboTier === 4)
+  else if (comboTier === 0 && lastComboTier > 0) game.comboLost()
+  lastComboTier = comboTier
   // Floating "+N" numbers, batched.
   popT -= dt
   if (popAcc > 0 && popT <= 0) {
@@ -784,10 +912,13 @@ function frame() {
     site.bulb.emissiveIntensity = 0.3 + lamp * 3
   }
   const ev = events.update(dt)
+  tower.sync(net.towerState(), net.serverNow()) // follow the room's tower (a no-op until it changes / offline)
   tower.update(dt, elapsed, night)
+  nextReel.update(dt)
   roofSparks.position.y = tower.visibleTop
   roofSparks.visible = tower.phase === 'building'
   cranes.update(dt, elapsed)
+  site.setReady(site.kiosks.invite, invite.ready()) // a "CLAIM!" tag over the sign while a reward waits
   site.update(dt, elapsed)
   pit.update(dt, elapsed)
   hall.update(dt, elapsed)
@@ -796,9 +927,6 @@ function frame() {
   gym.update(dt, elapsed, training?.st)
   robotHall.update(dt, elapsed)
   robots.update(dt, elapsed, { building: buildStatus === 'build', collecting: inPit && state.bag < cap, training: !!training })
-  bots.update(dt, elapsed)
-  crewBot = bots.near(player.position.x, player.position.z, CREW.radius)
-  if (crewBot && Math.abs(crewBot.pos.y - player.position.y) > 2) crewBot = null
   world.update(dt, elapsed)
   if (fireworks > 0) {
     fireworks -= dt
@@ -840,7 +968,7 @@ function frame() {
       gz = s.out.z
     }
   }
-  guide.visible = gx !== null && !anyWindowOpen()
+  guide.visible = gx !== null && !anyWindowOpen() && !finale.active
   if (guide.visible) {
     guide.position.set(gx, gy + Math.sin(elapsed * 4) * 0.4, gz)
     guide.rotation.y = elapsed * 2
@@ -892,7 +1020,6 @@ function frame() {
     const mins = (nx.at - state.totalBlocks) / bpm
     eta = mins < 1 ? `${Math.ceil(mins * 60)}s` : mins < 120 ? `${Math.floor(mins)}m ${Math.round((mins % 1) * 60)}s` : `${Math.round(mins / 60)}h`
   }
-  if (state.giftIn > 0) state.giftIn = Math.max(0, state.giftIn - dt)
   hud.update(dt, {
     cash: state.cash,
     speed: state.speed,
@@ -901,24 +1028,25 @@ function frame() {
     bag: Math.floor(state.bag),
     cap,
     buildings: state.buildings,
-    crew: S.crewBonus(),
-    crewCount: state.crew.length,
     rankIdx: S.rankIndex(),
     totalBlocks: state.totalBlocks,
-    tower: { ...t, name: tower.spec.def.name, openLeft: tower.lobby ? tower.openLeft : null },
+    tower: { ...t, name: tower.spec.def.name, openLeft: tower.lobby ? tower.openLeft : null, next: tower.sinking },
     event: ev,
     nextEvent: events.nextIn(),
     passes: state.passes,
-    giftIn: state.giftIn,
-    dailyReady: S.dailyStatus().canClaim,
+    freeReady: rewardsUi.freeReady(),
+    dailyReady: rewardsUi.anyReady(),
+    timed: S.timedList(),
     eta,
     muted: isMuted(),
     spins: state.spins.normal + state.spins.golden,
+    combo: S.comboMul(),
+    comboMax: S.comboMax(),
   })
   dress?.setFill(state.bag / Math.max(1, cap), cap > 120 ? Math.min(3, Math.log2(cap / 120) + 0.5) : 0)
 
   // Leaderboard + windows.
-  board.update(dt, [...bots.entries(), { name: myName(), strength: state.strength, speed: state.speed, blocks: state.totalBlocks, cash: state.cash, buildings: state.buildings, playtime: state.playtime }], myName())
+  board.update(dt, [{ name: myName(), strength: state.strength, speed: state.speed, blocks: state.totalBlocks, cash: state.cash, buildings: state.buildings, playtime: state.playtime }], myName())
   refreshT -= dt
   if (refreshT <= 0) {
     refreshT = 1
@@ -938,7 +1066,9 @@ function frame() {
     camera.position.set(...v[0])
     camera.lookAt(...v[1])
   }
+  finale.update(dt) // the Top Builders show drives the camera while it runs
   lighting.update(dt, playerGroup.position)
+  nightLights.update(dt, { group: playerGroup, avatar, facing: player.facing, gearOn: state.gear.on })
   postfx.render()
 
   // Save.
@@ -946,7 +1076,7 @@ function frame() {
   if (saveT > SAVE.every) {
     saveT = 0
     state.tower = tower.toSave()
-    S.save()
+    net.saveNow()
   }
 
   if (shownLoading) {
@@ -954,6 +1084,7 @@ function frame() {
     if (avatarReady || readySince > 5) {
       shownLoading = false
       bloxity.notifyFirstFrame()
+      offlineUi.arm()
     }
   }
 }
@@ -962,14 +1093,14 @@ let wiping = false // reset(): the save is gone, do not write it back on the way
 window.addEventListener('beforeunload', () => {
   if (!wiping) {
     state.tower = tower.toSave()
-    S.save()
+    net.saveNow(true)
   }
   bloxity.teardown()
 })
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && !wiping) {
     state.tower = tower.toSave()
-    S.save()
+    net.saveNow(true)
   }
 })
 
@@ -992,7 +1123,6 @@ if (import.meta.env.DEV) {
     tower,
     elevator,
     lobby,
-    bots,
     gym,
     // Finished buildings (opens gym pads with their unlock burst).
     buildings: (n) => {
@@ -1002,9 +1132,22 @@ if (import.meta.env.DEV) {
     give: (r) => S.grant(r),
     view: (from, to) => (window.__view = from ? [from, to] : null),
     blocks: (n) => tower.addBlocks(n),
+    // Plays the Next Building reel for building n (default: the next one) without touching the tower.
+    reel: (n) => nextReel.show(n ?? tower.spec.n + 1),
+    // Finish the building yourself (credited to you): the Top Builders finale follows.
+    finish: () => tower.addBlocks(1e15, meWho),
+    finale,
     spins: (n = 10) => S.addSpins('normal', n),
     pet: (id, tier = 0) => S.addPet(id, tier, { force: true }),
     robots,
+    // Dev: own + wear a Robot Gear piece (null takes it off).
+    gear: (id) => {
+      if (id) state.gear.owned[id] = true
+      S.wearGear(id)
+    },
+    remotes,
+    invite, // invite.open() / invite.ready(); net.invite holds the server's view
+    emotes, // emotes.playClip({ len, loop, tracks }) plays a clip on your avatar
     reset: () => {
       wiping = true
       S.resetSave()

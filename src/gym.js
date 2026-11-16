@@ -307,7 +307,7 @@ export function createGym(scene, fx = null) {
       }
     },
     // One rep on a station: sparks off the plates / a trail off the belt, a ring on the floor.
-    // `mine` = the player (bots get a lighter version).
+    // `mine` = the player (anyone else would get a lighter version).
     rep(st, mine = true) {
       st.flash = 1
       if (!fx) return

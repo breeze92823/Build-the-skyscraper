@@ -125,3 +125,121 @@ export function rumble() {
   const t = now()
   burst({ t, noise: 'brown', type: 'lowpass', f: 160, q: 0.4, a: 0.4, hold: 2.2, d: 0.9, gain: 0.6 })
 }
+
+// --- Upgrades ------------------------------------------------------------------------------------
+const COIN = [[1, 1, 0.5], [1.504, 0.6, 0.36], [2.24, 0.45, 0.26], [2.71, 0.3, 0.18], [3.47, 0.22, 0.12], [4.03, 0.12, 0.08]]
+const GLOCK = [[1, 1, 1.2], [2.756, 0.32, 0.4], [5.404, 0.1, 0.16]]
+
+// n coins clinking down, brightest first (the lucky drop and the Golden Touch buy).
+function coinSpill(t, n, spread, gain) {
+  for (let i = 0; i < n; i++) {
+    const at = t + Math.pow(i / n, 1.25) * spread + rnd(0, 0.015)
+    modal({ t: at, f: rnd(2400, 4300), modes: COIN, gain: gain * (1 - (i / n) * 0.65), beat: 7, strike: 0.2, decay: rnd(0.5, 1), pan: rnd(-0.35, 0.35), verb: 0.08 })
+  }
+}
+
+// A lucky drop (Fortune Luck / Golden Touch): a bright "ching" and a spill of coins, a longer
+// one the more coins dropped.
+export function lucky(coins = 3) {
+  if (!ok('lucky', 220, 1.2, 3)) return
+  const t = now()
+  modal({ t, f: 2093, modes: BELL, gain: 0.1, verb: 0.25 })
+  modal({ t: t + 0.07, f: 3136, modes: BELL, gain: 0.08, verb: 0.25 })
+  coinSpill(t + 0.05, Math.min(COARSE_POINTER ? 3 : 5, 2 + Math.round(coins / 4)), 0.25 + Math.min(0.4, coins * 0.03), 0.07)
+}
+
+// Coin Combo climbing: one stepping tick per quarter of the bar (step 1..4), a fanfare at the top.
+export function comboStep(step = 1, max = false) {
+  if (!ok('combo', 150, 0.8, 2)) return
+  const t = now()
+  const f = 880 * semi((step - 1) * 3)
+  modal({ t, f, modes: GLOCK, gain: 0.09, strike: 0.1, verb: 0.2 })
+  modal({ t: t + 0.07, f: f * 1.5, modes: GLOCK, gain: 0.06, verb: 0.2 })
+  if (max) {
+    ;[0, 4, 7, 12, 16].forEach((s, i) => modal({ t: t + 0.12 + i * 0.055, f: 1046 * semi(s), modes: BELL, gain: 0.07, verb: 0.35 }))
+    coinSpill(t + 0.15, COARSE_POINTER ? 3 : 5, 0.4, 0.06)
+  }
+}
+// The combo ran out.
+export function comboLost() {
+  if (!ok('comboLost', 400, 0.5)) return
+  const t = now()
+  tone({ t, f: 520, f2: 240, glide: 0.25, d: 0.25, gain: 0.07, lp: 1800 })
+}
+
+// Wide Trowel: the extra blocks it lays scraping and clacking down beside the first.
+export function placeWide(mult = 1.5) {
+  if (mult <= 1 || !ok('wide', 120, 0.25)) return
+  const t = now()
+  burst({ t, noise: 'pink', type: 'bandpass', f: 2200, f2: 900, q: 1.2, a: 0.01, d: 0.12, gain: 0.07 }) // trowel scrape
+  const n = Math.min(3, Math.ceil(mult) - 1)
+  for (let i = 0; i < n; i++) modal({ t: t + 0.04 + i * 0.045, f: vary(480 + i * 90, 0.08), modes: STONE, gain: 0.1, strike: 0.08, pan: rnd(-0.25, 0.25) })
+}
+
+// Lightning Hands: a quick electric crackle riding on the placing.
+export function handsZap() {
+  if (!ok('hands', 260, 0.3)) return
+  const t = now()
+  for (let i = 0; i < 5; i++) burst({ t: t + rnd(0, 0.1), type: 'highpass', f: rnd(3000, 6500), q: 0.8, a: 0.0004, d: rnd(0.004, 0.012), gain: rnd(0.05, 0.1), pan: rnd(-0.4, 0.4) })
+  tone({ t, type: 'sawtooth', f: 900, f2: 2200, glide: 0.07, d: 0.08, gain: 0.025, lp: 3500 })
+}
+
+// Buying an upgrade: a level-up chime with a flavour for what it is (the shared buy sound's
+// till drawer is not used here, the button press already clicked).
+export function upgrade(id) {
+  if (!ok('upgrade', 120, 1.4, 3)) return
+  const t = now()
+  const chime = (base) => {
+    modal({ t: t + 0.02, f: base, modes: BELL, gain: 0.1, verb: 0.3 })
+    modal({ t: t + 0.12, f: base * semi(7), modes: BELL, gain: 0.1, verb: 0.3 })
+    modal({ t: t + 0.22, f: base * semi(12), modes: BELL, gain: 0.09, verb: 0.35 })
+  }
+  switch (id) {
+    case 'grab': // blocks clacking into a bag
+      for (let i = 0; i < 4; i++) modal({ t: t + i * 0.05, f: vary(560 + i * 60, 0.08), modes: STONE, gain: 0.14, strike: 0.08 })
+      chime(880)
+      break
+    case 'build': // hammer taps
+      for (let i = 0; i < 3; i++) {
+        tone({ t: t + i * 0.07, f: 150, f2: 70, d: 0.07, gain: 0.2 })
+        modal({ t: t + i * 0.07, f: 420 + i * 40, modes: STEEL, gain: 0.07, strike: 0.15 })
+      }
+      chime(988)
+      break
+    case 'range': // a sonar ping going out
+      tone({ t, f: 700, f2: 1400, glide: 0.18, d: 0.3, gain: 0.08 })
+      modal({ t: t + 0.12, f: 1400, modes: GLOCK, gain: 0.07, verb: 0.45 })
+      chime(784)
+      break
+    case 'lift': // gate clang and a motor sweep
+      modal({ t, f: 180, modes: STEEL, gain: 0.12, strike: 0.15 })
+      tone({ t: t + 0.05, type: 'sawtooth', f: 90, f2: 220, glide: 0.35, d: 0.3, gain: 0.04, lp: 600 })
+      chime(740)
+      break
+    case 'golden': // a golden ring over a coin spill
+      modal({ t, f: 1568, modes: BELL, gain: 0.12, verb: 0.4 })
+      coinSpill(t + 0.05, COARSE_POINTER ? 3 : 5, 0.35, 0.08)
+      chime(1046)
+      break
+    case 'fortune': // a sparkling lucky run
+      ;[0, 4, 7, 12, 16, 19].forEach((s, i) => modal({ t: t + i * 0.05, f: 1046 * semi(s), modes: GLOCK, gain: 0.07, verb: 0.4 }))
+      break
+    case 'combo': // stepping coin clinks
+      ;[0, 3, 5, 8].forEach((s, i) => modal({ t: t + i * 0.07, f: 1318 * semi(s), modes: COIN, gain: 0.1, beat: 7, strike: 0.2, verb: 0.1 }))
+      chime(1175)
+      break
+    case 'trowel': // scrape and a stone thud
+      burst({ t, noise: 'pink', type: 'bandpass', f: 2400, f2: 800, q: 1.2, a: 0.01, d: 0.18, gain: 0.09 })
+      tone({ t: t + 0.12, f: 120, f2: 60, d: 0.1, gain: 0.25 })
+      modal({ t: t + 0.12, f: 380, modes: STONE, gain: 0.14, strike: 0.1 })
+      chime(932)
+      break
+    case 'hands': // electric crackle and a rising whoosh
+      for (let i = 0; i < 9; i++) burst({ t: t + rnd(0, 0.2), type: 'highpass', f: rnd(3000, 7000), q: 0.8, a: 0.0004, d: rnd(0.004, 0.014), gain: rnd(0.06, 0.12), pan: rnd(-0.5, 0.5) })
+      tone({ t, type: 'sawtooth', f: 300, f2: 1800, glide: 0.25, d: 0.2, gain: 0.04, lp: 3000 })
+      chime(1109)
+      break
+    default:
+      chime(880)
+  }
+}

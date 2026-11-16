@@ -6,11 +6,11 @@ import { mats } from './props.js'
 import { paintHazard, paintLattice, toTexture } from './textures.js'
 
 // The construction hoist on the tower's south face: three yellow lattice masts as tall as
-// the building, your cage between the east pair and the crew's cage between the west pair.
+// the building, your cage between the east pair; the west pair is an empty, closed shaft (scenery).
 // Stand in your cage for a moment and it rides to the other end (Elevator Speed upgrade);
 // stand near the shaft at the end it is not at and it comes to fetch you. Gates close the
 // shaft at the ground and the roof while the cage is away, and a bridge joins the cage to
-// the roof at the top. The crew cage loops on its own for the worker bots.
+// the roof at the top.
 
 const smooth = (t) => t * t * (3 - 2 * t)
 
@@ -82,7 +82,6 @@ export function createElevator(scene, tower, { liftSpeed, onRide }) {
     return g
   }
   const lift = makeCage(yellow)
-  const crew = makeCage(std('#ff8a1a'))
 
   // Bridge from your cage to the roof, and the ground pad in front of the shaft.
   const bridge = new Group()
@@ -90,9 +89,6 @@ export function createElevator(scene, tower, { liftSpeed, onRide }) {
   const railL = box(bridge, 0.08, 1.1, 1, yellow, -S / 2 + 0.15, 0, 0)
   const railR = box(bridge, 0.08, 1.1, 1, yellow, S / 2 - 0.15, 0, 0)
   root.add(bridge)
-  const crewBridge = new Group()
-  const crewDeck = box(crewBridge, S - 0.2, 0.25, 1, std('#4a4e57', { metalness: 0.4 }), 0, -0.25, 0)
-  root.add(crewBridge)
 
   const pad = new Group()
   box(pad, S * 2 + M * 3 + 2, 0.12, 7, std('#5a5e66', { roughness: 0.8 }), 0, 0, 0)
@@ -110,16 +106,15 @@ export function createElevator(scene, tower, { liftSpeed, onRide }) {
   const bridgeCol = addFixed(RAPIER.ColliderDesc.cuboid(S / 2, 0.12, 1), { x: 0, y: -50, z: 0 })
   const gateBottom = addFixed(RAPIER.ColliderDesc.cuboid(S / 2, 1.6, 0.15), { x: 0, y: -50, z: 0 })
   const gateTop = addFixed(RAPIER.ColliderDesc.cuboid(S / 2, 1.6, 0.15), { x: 0, y: -50, z: 0 })
-  // The crew shaft is never open to players.
-  const crewBlockS = addFixed(RAPIER.ColliderDesc.cuboid(S / 2, 2, 0.15), { x: 0, y: -50, z: 0 })
-  const crewBlockN = addFixed(RAPIER.ColliderDesc.cuboid(S / 2, 1.6, 0.15), { x: 0, y: -50, z: 0 })
-  const crewBack = addFixed(RAPIER.ColliderDesc.cuboid(S / 2, 1, 0.15), { x: 0, y: -50, z: 0 })
+  // The empty west shaft is never open to players.
+  const shaftBlockS = addFixed(RAPIER.ColliderDesc.cuboid(S / 2, 2, 0.15), { x: 0, y: -50, z: 0 })
+  const shaftBlockN = addFixed(RAPIER.ColliderDesc.cuboid(S / 2, 1.6, 0.15), { x: 0, y: -50, z: 0 })
+  const shaftBack = addFixed(RAPIER.ColliderDesc.cuboid(S / 2, 1, 0.15), { x: 0, y: -50, z: 0 })
   void id
 
   // --- State ------------------------------------------------------------------------------------
   // armed: the rider has to step out after arriving before the cage will take them again.
   const L = { y: 0, from: 0, to: 0, t: 0, dur: 0, state: 'bottom', doors: 1, boardT: 0, carrying: false, offX: 0, offZ: 0, armed: true }
-  const B = { y: 0, from: 0, to: 0, t: 0, dur: 0, state: 'bottom', wait: ELEVATOR.botWait, doors: 1 }
   let top = 0 // roof y the cages serve
   let A = tower.anchors
 
@@ -152,21 +147,16 @@ export function createElevator(scene, tower, { liftSpeed, onRide }) {
     bridgeCol.setHalfExtents({ x: S / 2, y: 0.12, z: ls / 2 + 0.05 })
     bridge.visible = !tower.sinking && tower.floors > 0
     bridgeCol.setEnabled(bridge.visible)
-    const cs = span(A.botWall)
-    crewBridge.position.set(C.x + A.botX, top, C.z + A.cageZ - S / 2 - cs / 2 + 0.1)
-    crewDeck.scale.z = cs
-    crewBridge.visible = bridge.visible
     gateBottom.setTranslation({ x: C.x + A.liftX, y: 1.6, z: zs + S / 2 + 0.15 })
     gateTop.setTranslation({ x: C.x + A.liftX, y: top + 1.6, z: C.z + A.liftWall + 0.3 })
-    crewBlockS.setTranslation({ x: C.x + A.botX, y: 2, z: zs + S / 2 + 0.15 })
-    crewBlockN.setTranslation({ x: C.x + A.botX, y: top + 1.6, z: C.z + A.botWall + 0.3 })
-    crewBack.setTranslation({ x: C.x + A.botX, y: 1, z: zs - S / 2 - 0.15 })
-    // Cages never hang above the (sinking) top.
+    shaftBlockS.setTranslation({ x: C.x + A.botX, y: 2, z: zs + S / 2 + 0.15 })
+    shaftBlockN.setTranslation({ x: C.x + A.botX, y: top + 1.6, z: C.z + A.botWall + 0.3 })
+    shaftBack.setTranslation({ x: C.x + A.botX, y: 1, z: zs - S / 2 - 0.15 })
+    // The cage never hangs above the (sinking) top.
     if (L.state === 'top' || L.y > h) L.y = Math.min(h, top)
-    if (B.state === 'top' || B.y > h) B.y = Math.min(h, top)
     if (tower.sinking) {
-      L.state = B.state = 'bottom'
-      L.y = B.y = 0
+      L.state = 'bottom'
+      L.y = 0
     }
   }
   tower.on('height', layout)
@@ -239,37 +229,11 @@ export function createElevator(scene, tower, { liftSpeed, onRide }) {
     // A floor finished while the cage was up: keep it level with the roof (and its rider).
     if (L.state === 'top' && Math.abs(L.y - top) > 0.01) L.y = top
 
-    // Crew cage loop.
-    if (B.state === 'bottom' || B.state === 'top') {
-      B.wait -= dt
-      if (B.wait <= 0 && top > 1 && !tower.sinking) {
-        B.from = B.y
-        B.to = B.state === 'bottom' ? top : 0
-        B.t = 0
-        B.dur = Math.abs(B.to - B.from) / 16 + 0.8
-        B.state = B.to > B.from ? 'up' : 'down'
-      }
-    } else {
-      B.t += dt
-      const k = Math.min(1, B.t / B.dur)
-      B.y = B.from + (B.to - B.from) * smooth(k)
-      if (k >= 1) {
-        B.state = B.to > 1 ? 'top' : 'bottom'
-        B.y = B.to
-        B.wait = ELEVATOR.botWait
-      }
-    }
-    if (B.state === 'top') B.y = top
-    B.doors += ((B.state === 'up' || B.state === 'down' ? 0 : 1) - B.doors) * Math.min(1, dt * 5)
-
     // Visuals.
     lift.position.set(C.x + A.liftX, L.y, C.z + A.cageZ)
-    crew.position.set(C.x + A.botX, B.y, C.z + A.cageZ)
-    for (const [cage, s] of [[lift, L], [crew, B]]) {
-      for (const g of cage.userData.gates) {
-        g.position.y = s.doors * 2.35
-        g.scale.y = 1 - s.doors * 0.9
-      }
+    for (const g of lift.userData.gates) {
+      g.position.y = L.doors * 2.35
+      g.scale.y = 1 - L.doors * 0.9
     }
     for (const b of beacons) b.visible = Math.sin(elapsed * 3) > 0
     hint.visible = L.state === 'bottom' && top > 1
@@ -277,7 +241,7 @@ export function createElevator(scene, tower, { liftSpeed, onRide }) {
     cageFloor.setTranslation({ x: C.x + A.liftX, y: L.y - 0.15, z: C.z + A.cageZ })
     gateBottom.setEnabled(L.state !== 'bottom' && !player.locked)
     gateTop.setEnabled(L.state !== 'top' && tower.floors > 0 && !tower.sinking)
-    crewBlockN.setEnabled(tower.floors > 0 && !tower.sinking)
+    shaftBlockN.setEnabled(tower.floors > 0 && !tower.sinking)
     return {
       boarding: L.boardT > 0 ? Math.min(1, L.boardT / ELEVATOR.board) : 0,
       riding: L.carrying,
@@ -288,18 +252,12 @@ export function createElevator(scene, tower, { liftSpeed, onRide }) {
 
   return {
     update,
-    get crew() {
-      return B
-    },
     get lift() {
       return L
     },
-    // World spots the bots walk between.
+    // World spots (the guide arrow).
     spots() {
       return {
-        crewBottom: { x: C.x + A.botX, z: C.z + A.cageZ + S / 2 + 2.2 },
-        crewIn: { x: C.x + A.botX, z: C.z + A.cageZ },
-        crewRoof: { x: C.x + A.botX, z: C.z + A.botWall - 2.2 },
         liftBottom: { x: C.x + A.liftX, z: C.z + A.cageZ + S / 2 + 2.5 },
       }
     },

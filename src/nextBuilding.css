@@ -1,0 +1,238 @@
+/* Next Building reel (nextBuilding.js). Sizes are in --nbu (set from JS: the smaller of 1% of
+   the height and 1.35% of the width) so the reel fits a phone in either orientation. */
+.nb {
+  --nbu: 8px;
+  --ink: #14161c;
+  --rar: #ffffff;
+  --rar-dark: #6b7480;
+  position: fixed;
+  inset: 0;
+  z-index: 13; /* over the HUD (12), under prompts (15) and windows (100) */
+  pointer-events: none;
+  touch-action: none;
+  font-family: 'Fredoka', system-ui, sans-serif;
+  font-weight: 700;
+  opacity: 0;
+  transition: opacity 0.45s ease;
+  background: radial-gradient(ellipse 70% 65% at 50% 52%, rgba(6, 10, 20, 0.28), rgba(6, 10, 20, 0.66));
+  overflow: hidden;
+  user-select: none;
+}
+.nb[hidden] { display: none; }
+.nb.open { opacity: 1; }
+
+/* "NEXT BUILDING" -> the rarity on reveal. */
+.nb-title {
+  position: absolute;
+  left: 50%;
+  top: calc(env(safe-area-inset-top, 0px) + 7.5 * var(--nbu));
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: calc(8.6 * var(--nbu));
+  line-height: 1;
+  letter-spacing: 0.01em;
+  color: #ffffff;
+  -webkit-text-stroke: calc(1.1 * var(--nbu)) var(--ink);
+  paint-order: stroke fill;
+  text-shadow: 0 calc(0.55 * var(--nbu)) 0 var(--ink);
+}
+.nb-title span {
+  display: inline-block;
+  transform: translateY(-30%) scale(0.85);
+  opacity: 0;
+  transition: transform 0.5s cubic-bezier(0.2, 1.6, 0.4, 1), opacity 0.3s ease;
+}
+.nb.open .nb-title span { transform: none; opacity: 1; }
+.nb.reveal .nb-title span {
+  color: var(--rar);
+  text-shadow: 0 calc(0.55 * var(--nbu)) 0 var(--ink), 0 0 calc(3 * var(--nbu)) var(--rar);
+}
+.nb-title.pop span { animation: nb-pop 0.62s cubic-bezier(0.2, 1.7, 0.4, 1) both; }
+.nb.high .nb-title.pop span { animation: nb-pop 0.62s cubic-bezier(0.2, 1.7, 0.4, 1) both, nb-pulse 1.1s 0.62s ease-in-out infinite; }
+
+/* The reel's centre line sits a little below the middle of the screen. */
+.nb-stage {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 53%;
+  height: 0;
+}
+.nb-reel { position: absolute; inset: 0; }
+.nb-item {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  will-change: transform, opacity;
+}
+.nb.reveal .nb-item { transition: opacity 0.35s ease; }
+.nb-in {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: transform 0.55s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+.nb-item.chosen .nb-in { transform: scale(1.14); animation: nb-bob 2.2s 0.55s ease-in-out infinite; }
+.nb-pic {
+  position: relative;
+  width: calc(23 * var(--nbu));
+  height: calc(34 * var(--nbu));
+}
+.nb-pic img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 calc(0.8 * var(--nbu)) calc(1.2 * var(--nbu)) rgba(0, 0, 0, 0.55));
+}
+.nb-block {
+  width: 46%;
+  height: 88%;
+  margin: 8% auto 0;
+  border-radius: calc(0.8 * var(--nbu)) calc(0.8 * var(--nbu)) 2px 2px;
+  background: repeating-linear-gradient(0deg, var(--frame) 0 2px, var(--glass) 2px calc(2.2 * var(--nbu)));
+  box-shadow: 0 0 0 2px var(--ink);
+}
+.nb-pct {
+  position: absolute;
+  left: 74%;
+  top: 24%;
+  white-space: nowrap;
+  font-size: calc(5 * var(--nbu));
+  line-height: 1;
+  -webkit-text-stroke: calc(0.75 * var(--nbu)) var(--ink);
+  paint-order: stroke fill;
+  text-shadow: 0 calc(0.35 * var(--nbu)) 0 var(--ink);
+}
+.nb-name {
+  margin-top: calc(-0.6 * var(--nbu));
+  white-space: nowrap;
+  font-size: calc(5.6 * var(--nbu));
+  line-height: 1.05;
+  color: #ffffff;
+  -webkit-text-stroke: calc(0.8 * var(--nbu)) var(--ink);
+  paint-order: stroke fill;
+  text-shadow: 0 calc(0.4 * var(--nbu)) 0 var(--ink);
+}
+
+/* White arrows either side of the centre line, nudged inward as each building passes. */
+.nb-arrow {
+  position: absolute;
+  top: 0;
+  width: calc(4.4 * var(--nbu));
+  height: calc(5.4 * var(--nbu));
+  background: no-repeat center / contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 54'%3E%3Cpath d='M6 5 L40 27 L6 49 Z' fill='%23fff' stroke='%2314161c' stroke-width='5' stroke-linejoin='round'/%3E%3C/svg%3E");
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45));
+  transition: opacity 0.3s ease;
+}
+.nb-arrow.left { left: calc(50% - 34 * var(--nbu)); transform: translate(-50%, -50%); }
+.nb-arrow.right { left: calc(50% + 34 * var(--nbu)); transform: translate(-50%, -50%) scaleX(-1); }
+.nb-arrow.left.kick { animation: nb-kick-l 0.14s ease-out; }
+.nb-arrow.right.kick { animation: nb-kick-r 0.14s ease-out; }
+.nb.reveal .nb-arrow { opacity: 0; }
+
+/* Reveal: rotating rays + a glow behind the pick. */
+.nb-rays,
+.nb-glow {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  border-radius: 50%;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.25);
+  transition: opacity 0.35s ease, transform 0.7s cubic-bezier(0.2, 1.5, 0.4, 1);
+}
+.nb-rays { width: calc(86 * var(--nbu)); height: calc(86 * var(--nbu)); }
+.nb-rays::before,
+.nb-rays::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  -webkit-mask: radial-gradient(circle, #000 0%, rgba(0, 0, 0, 0.9) 22%, transparent 68%);
+  mask: radial-gradient(circle, #000 0%, rgba(0, 0, 0, 0.9) 22%, transparent 68%);
+}
+.nb-rays::before {
+  background: repeating-conic-gradient(from 0deg, var(--rar) 0deg 8deg, transparent 8deg 22deg);
+  animation: nb-spin 14s linear infinite;
+}
+.nb-rays::after {
+  background: repeating-conic-gradient(from 11deg, rgba(255, 255, 255, 0.55) 0deg 3deg, transparent 3deg 22deg);
+  animation: nb-spin 22s linear infinite reverse;
+}
+.nb-glow {
+  width: calc(46 * var(--nbu));
+  height: calc(46 * var(--nbu));
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.95) 0%, var(--rar) 26%, transparent 66%);
+}
+.nb.reveal .nb-rays { opacity: 0.95; transform: translate(-50%, -50%) scale(1); }
+.nb.reveal .nb-glow { opacity: 0.75; transform: translate(-50%, -50%) scale(1); }
+
+.nb-sparkles { position: absolute; left: 0; right: 0; top: 0; height: 0; }
+.nb-spark {
+  position: absolute;
+  width: calc(3.2 * var(--nbu));
+  height: calc(3.2 * var(--nbu));
+  transform: translate(-50%, -50%) scale(0);
+  background: currentColor;
+  clip-path: polygon(50% 0, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0 50%, 39% 39%);
+  filter: drop-shadow(0 0 4px currentColor);
+  animation: nb-twinkle 1.5s ease-in-out infinite;
+}
+
+.nb-bonus {
+  position: absolute;
+  left: 50%;
+  top: calc(27 * var(--nbu));
+  translate: -50% 0; /* separate from the pop animation's transform */
+  white-space: nowrap;
+  padding: calc(0.7 * var(--nbu)) calc(2.2 * var(--nbu));
+  border-radius: 999px;
+  background: rgba(10, 14, 24, 0.78);
+  border: calc(0.35 * var(--nbu)) solid var(--rar);
+  color: var(--rar);
+  font-size: calc(3.3 * var(--nbu));
+  line-height: 1.1;
+  animation: nb-pop 0.55s 0.25s cubic-bezier(0.2, 1.7, 0.4, 1) both;
+}
+.nb-bonus[hidden] { display: none; }
+
+.nb-confetti { position: absolute; inset: 0; overflow: hidden; perspective: 600px; }
+.nb-paper { position: absolute; top: 0; border-radius: 1px; }
+
+@keyframes nb-pop {
+  0% { transform: scale(0.2); opacity: 0; }
+  60% { transform: scale(1.18); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes nb-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+@keyframes nb-bob {
+  0%, 100% { transform: scale(1.14) translateY(0); }
+  50% { transform: scale(1.14) translateY(calc(-0.9 * var(--nbu))); }
+}
+@keyframes nb-spin { to { transform: rotate(360deg); } }
+@keyframes nb-kick-l {
+  0% { transform: translate(-50%, -50%); }
+  45% { transform: translate(-28%, -50%) scale(1.12); }
+  100% { transform: translate(-50%, -50%); }
+}
+@keyframes nb-kick-r {
+  0% { transform: translate(-50%, -50%) scaleX(-1); }
+  45% { transform: translate(-72%, -50%) scaleX(-1.12) scaleY(1.12); }
+  100% { transform: translate(-50%, -50%) scaleX(-1); }
+}
+@keyframes nb-twinkle {
+  0%, 100% { transform: translate(-50%, -50%) scale(0) rotate(0deg); opacity: 0; }
+  45% { transform: translate(-50%, -50%) scale(1) rotate(45deg); opacity: 1; }
+  70% { transform: translate(-50%, -50%) scale(0.6) rotate(70deg); opacity: 0.8; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nb-rays::before,
+  .nb-rays::after,
+  .nb-item.chosen .nb-in,
+  .nb-spark { animation: none; }
+}

@@ -26,6 +26,13 @@ export const player = {
   // Flying (Robot Gear jet form): { climb, sink, accel, maxY } replaces gravity; holding Jump climbs,
   // letting go glides down at `sink`.
   fly: null,
+  // Wall climbing (Spider Arms): { nx, nz (the wall's outward normal), speed }. Forward / back climbs
+  // up / down, strafe moves along the wall, Jump kicks off it (sets climbJump for robotPlayer).
+  climb: null,
+  climbJump: false,
+  // Under a parachute (Robot Gear): { sink, decel, glide, speed }. The fall is braked toward -sink at
+  // `decel`, the canopy keeps flying forward at `glide` and steering is capped at `speed`.
+  chute: null,
 }
 
 const HALF = PLAYER_DIMS.height / 2 // capsule centre above the feet
@@ -111,6 +118,10 @@ function step(dt) {
     player.grounded = true
     return
   }
+  if (player.climb) {
+    climbStep(dt)
+    return
+  }
 
   // Camera-relative ground basis.
   const yaw = getYaw()
@@ -123,11 +134,23 @@ function step(dt) {
   const scale = len > 1 ? 1 / len : 1
   const wishX = (fwdX * mv.z + rightX * mv.x) * scale
   const wishZ = (fwdZ * mv.z + rightZ * mv.x) * scale
-  const speed = player.walkSpeed * (inputState.sprint ? player.sprintMul : 1)
+  const C = player.fly ? null : player.chute
+  let speed = player.walkSpeed * (inputState.sprint ? player.sprintMul : 1)
+  let targetX = wishX
+  let targetZ = wishZ
+  if (C) {
+    // A canopy always flies forward; the move keys steer it (no sprinting under a parachute).
+    speed = C.speed
+    if (len < 0.05) {
+      const g = C.glide / C.speed
+      targetX = Math.sin(player.facing) * g
+      targetZ = Math.cos(player.facing) * g
+    }
+  }
 
   const quick = Math.max(1, player.walkSpeed / PHYSICS.walkSpeed) // fast runners also accelerate faster
   const rate = (!player.grounded ? PHYSICS.airAccel : len > 0.01 ? PHYSICS.accel : PHYSICS.decel) * quick
-  approach2D(player.velocity, wishX * speed, wishZ * speed, rate * dt)
+  approach2D(player.velocity, targetX * speed, targetZ * speed, rate * dt)
 
   // Jump: buffered a little before landing, and allowed a little after leaving a ledge.
   if (inputState.jump) {
@@ -149,6 +172,10 @@ function step(dt) {
     const target = inputState.jumpHeld && player.position.y < F.maxY ? F.climb : player.grounded ? -2 : F.sink
     const dv = target - player.velocity.y
     player.velocity.y += Math.sign(dv) * Math.min(Math.abs(dv), F.accel * dt)
+  } else if (C && !player.grounded) {
+    // Canopy open: brake hard toward the sink rate (the opening shock), never fall faster than it.
+    const vy = player.velocity.y + PHYSICS.gravity * dt
+    player.velocity.y = vy < -C.sink ? Math.min(-C.sink, player.velocity.y + C.decel * dt) : vy
   } else player.velocity.y += PHYSICS.gravity * dt
   if (player.grounded && !jumped && player.velocity.y < -2) player.velocity.y = -2 // stay pressed to slopes
 
@@ -180,6 +207,54 @@ function step(dt) {
   else if (Math.hypot(wishX, wishZ) > 0.05) {
     player.facing = rotateTowards(player.facing, Math.atan2(wishX, wishZ), PHYSICS.turnSpeed * dt)
   }
+}
+
+// On a wall: no gravity; forward / back moves up / down, strafe along the wall (right = the
+// climber's right while facing it), a light push into the wall keeps the capsule against it.
+function climbStep(dt) {
+  const c = player.climb
+  const mv = inputState.move
+  if (inputState.jump) {
+    inputState.jump = false
+    player.climb = null
+    player.climbJump = true
+    player.velocity.x = c.nx * 9
+    player.velocity.z = c.nz * 9
+    player.velocity.y = 7
+    jumpQueued = 0
+    sinceGrounded = PHYSICS.coyoteTime + 1
+    return
+  }
+  const side = mv.x * c.speed * 0.7
+  player.velocity.x = c.nz * side - c.nx * 1.5
+  player.velocity.z = -c.nx * side - c.nz * 1.5
+  player.velocity.y = mv.z * c.speed
+  const desired = { x: player.velocity.x * dt, y: player.velocity.y * dt, z: player.velocity.z * dt }
+  controller.computeColliderMovement(collider, desired, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS)
+  const moved = controller.computedMovement()
+  player.grounded = mv.z <= 0 && controller.computedGrounded()
+  const t = body.translation()
+  const next = { x: t.x + moved.x, y: t.y + moved.y, z: t.z + moved.z }
+  body.setNextKinematicTranslation(next)
+  player.position.x = next.x
+  player.position.y = next.y - HALF
+  player.position.z = next.z
+  player.facing = Math.atan2(-c.nx, -c.nz)
+}
+
+// Distance from the feet down to the first thing below (tower roof, scaffold, ground), up to `max` m.
+// Nothing hit: the height above y = 0 (the desert floor).
+let ray = null
+export function groundBelow(max = 300) {
+  const p = player.position
+  if (!body || !world) return Math.min(max, Math.max(0, p.y))
+  ray ??= new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 })
+  ray.origin.x = p.x
+  ray.origin.y = p.y + 0.1
+  ray.origin.z = p.z
+  const hit = world.castRay(ray, max, true, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, undefined, collider, body)
+  if (!hit) return Math.min(max, Math.max(0, p.y))
+  return Math.max(0, (hit.timeOfImpact ?? hit.toi) - 0.1)
 }
 
 // Called once per frame after the physics ticks: interpolated feet position.

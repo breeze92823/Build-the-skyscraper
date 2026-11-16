@@ -120,6 +120,8 @@ export function createCranes(scene, tower) {
   layout()
 
   return {
+    // Where each mast stands (nightLights.js hangs a floodlight on it, aimed at the roof).
+    masts: cranes.map((c) => c.root.position),
     update(dt, elapsed) {
       for (const c of cranes) {
         // Slew toward a target, pick a new one when there.

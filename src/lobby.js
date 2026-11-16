@@ -17,7 +17,7 @@ import { syncYawToPlayer } from './camera.js'
 // canopy, steps and a "GO INSIDE!" sign. The core's express elevator (E) rides to a hut on
 // the roof and back: doors close, a short ride, and you step out at the other end (both
 // cabs look the same inside, so the swap is seamless). Main reads contains() to pay the
-// 5X stats and spots() for the bots that wander in.
+// 5X stats and spots() for the guide arrow.
 
 const DEFAULT_LOOK = { name: 'SKY LOUNGE', carpet: '#123a36', wall: '#16302c', accent: '#3fd3e6', wood: '#8a5a32', sofa: '#f4f1ea', lights: 'chandelier' }
 const smooth = (t) => t * t * (3 - 2 * t)
@@ -208,7 +208,6 @@ export function createLobby(scene, tower, { onRide } = {}) {
     let rMin = Infinity
     for (const [x, z] of pts) rMin = Math.min(rMin, Math.hypot(x, z))
     const lounges = []
-    const seats = []
     for (const rf of [0.62, 0.4]) {
       const r = rMin * rf
       for (let k = 0; k < 8; k++) {
@@ -239,8 +238,6 @@ export function createLobby(scene, tower, { onRide } = {}) {
       const c = Math.cos(l.yaw)
       const s = Math.sin(l.yaw)
       for (const sz of [-1.55, 1.55]) solid(1.5, 0.6, 0.55, l.x + sz * s, y0 + 0.6, l.z + sz * c, l.yaw)
-      // Where a bot stands: just off the rug's ends.
-      for (const ex of [-3.6, 3.6]) seats.push({ x: C.x + l.x + ex * c, z: C.z + l.z - ex * s, look: { x: C.x + l.x, z: C.z + l.z } })
       // A light over it.
       hangLight(deco, T.lights, l.x, H, l.z, accent, rand)
     }
@@ -359,7 +356,7 @@ export function createLobby(scene, tower, { onRide } = {}) {
     tower.group.add(root)
     setDoors(lobbyCab, 1)
     setDoors(topCab, 1)
-    built = { n: spec.n, root, colliders, own, lobbyCab, topCab, goSign, seats, y0, y1, pts, door: D, front, hasColliders: true }
+    built = { n: spec.n, root, colliders, own, lobbyCab, topCab, goSign, y0, y1, pts, door: D, front, hasColliders: true }
   }
 
   function hangLight(g, kind, x, H, z, accent, rand, scale = 1) {
@@ -535,7 +532,7 @@ export function createLobby(scene, tower, { onRide } = {}) {
       if (!built) return false
       return p.y < tower.roofY + 6 && pointInPolygon(p.x - C.x, p.z - C.z, offset(built.pts, 1.2))
     },
-    // World spots for the guide arrow and the bots.
+    // World spots for the guide arrow.
     spots() {
       if (!built?.hasColliders) return null
       const D = built.door
@@ -546,7 +543,6 @@ export function createLobby(scene, tower, { onRide } = {}) {
         out: { x: C.x + D.x + 3.2 * s, z: C.z + D.z + 3.2 * c },
         in: { x: C.x + D.x - 2.5 * s, z: C.z + D.z - 2.5 * c },
         top: { x: C.x + D.x, y: built.y1 + 1, z: C.z + D.z + 1.5 },
-        seats: built.seats,
       }
     },
   }

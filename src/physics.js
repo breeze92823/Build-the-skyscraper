@@ -126,4 +126,18 @@ export function segmentClear(ax, ay, az, bx, by, bz) {
   return (hit.timeOfImpact ?? hit.toi) / len
 }
 
+// Distance from (x, y, z) straight down to the first fixed collider, up to `max` m (no hit: the height
+// above y = 0, the desert floor). For other players' parachutes; the local player has player.js groundBelow.
+let downRay = null
+export function groundBelowAt(x, y, z, max = 300) {
+  if (!world) return Math.min(max, Math.max(0, y))
+  downRay ??= new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 })
+  downRay.origin.x = x
+  downRay.origin.y = y + 0.1
+  downRay.origin.z = z
+  const hit = world.castRay(downRay, max, true, STATIC_ONLY())
+  if (!hit) return Math.min(max, Math.max(0, y))
+  return Math.max(0, (hit.timeOfImpact ?? hit.toi) - 0.1)
+}
+
 export const bodyCount = () => (world ? world.bodies.len() : 0)

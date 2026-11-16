@@ -1,0 +1,554 @@
+/* Daily & Playtime Rewards + Free Reward windows (rewardsUi.js), and the dark window frame they and
+   the Pets window share (.uiw-dark on the overlay). Lengths are design px x --uiw-u (uiWindow.css),
+   measured off the 1920x991 references. */
+
+/* --- Dark frame ---------------------------------------------------------------------------- */
+.uiw-dark .uiw-dialog {
+  background: #3a3a3c;
+  border-color: #1d1a22;
+  box-shadow:
+    inset 0 0 0 max(2px, calc(7 * var(--uiw-u))) #4f4f53,
+    0 calc(10 * var(--uiw-u)) calc(30 * var(--uiw-u)) rgba(0, 0, 0, 0.35);
+}
+.uiw-dark .uiw-title h2 {
+  --ow: 6;
+}
+.uiw-title-icon:empty {
+  display: none;
+}
+
+/* --- Shared reward card -------------------------------------------------------------------- */
+.rw-card,
+.fr-card {
+  --c1: #5fdcff;
+  --c2: #0b9de6;
+  --ray: rgba(255, 255, 255, 0.2);
+  position: relative;
+  overflow: hidden;
+  border: max(2px, calc(5 * var(--uiw-u))) solid #1d1a22;
+  border-radius: calc(18 * var(--uiw-u));
+  background: radial-gradient(circle at 50% 46%, var(--c1) 0%, var(--c2) 72%);
+  box-shadow: inset 0 0 0 max(1px, calc(4 * var(--uiw-u))) rgba(255, 255, 255, 0.35);
+  color: #fff;
+}
+.rw-rays {
+  position: absolute;
+  inset: -40%;
+  background: repeating-conic-gradient(from 0deg at 50% 50%, var(--ray) 0deg 9deg, transparent 9deg 18deg);
+  pointer-events: none;
+  animation: rw-spin 40s linear infinite;
+}
+@keyframes rw-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rw-rays {
+    animation: none;
+  }
+}
+.c-blue { --c1: #6fe1ff; --c2: #10a4ec; }
+.c-purple { --c1: #f27bff; --c2: #c21fe6; --ray: rgba(255, 255, 255, 0.16); }
+.c-gold { --c1: #ffe680; --c2: #ffb300; --ray: rgba(255, 255, 255, 0.25); }
+.c-red { --c1: #ff8a9a; --c2: #f0284f; --ray: rgba(255, 255, 255, 0.18); }
+.c-rainbow {
+  --ray: rgba(255, 255, 255, 0.14);
+  background:
+    radial-gradient(circle at 50% 46%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 55%),
+    linear-gradient(115deg, #ff2bd6 0%, #ff5a5a 22%, #ffc21a 42%, #57e05a 60%, #22c4ff 80%, #9a5cff 100%);
+}
+
+/* --- Daily & Playtime window --------------------------------------------------------------- */
+.w-rewards {
+  --uiw-w: 1260;
+  --uiw-h: 730;
+}
+.w-rewards .uiw-body {
+  padding: calc(34 * var(--uiw-u)) calc(18 * var(--uiw-u)) calc(26 * var(--uiw-u));
+  gap: calc(10 * var(--uiw-u));
+}
+.rw-head {
+  display: flex;
+  align-items: center;
+  gap: calc(14 * var(--uiw-u));
+  padding: 0 calc(70 * var(--uiw-u)) 0 calc(76 * var(--uiw-u));
+  min-height: calc(46 * var(--uiw-u));
+}
+.rw-head + .rw-row {
+  margin-bottom: calc(12 * var(--uiw-u));
+}
+.rw-label {
+  flex: none;
+  font-size: max(15px, calc(36 * var(--uiw-u)));
+  line-height: 1;
+  color: #f2dcae;
+  --ow: 3.5;
+}
+.rw-bang {
+  flex: none;
+  width: max(18px, calc(36 * var(--uiw-u)));
+  height: max(18px, calc(36 * var(--uiw-u)));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: max(2px, calc(3 * var(--uiw-u))) solid #fff;
+  background: #ee2a2a;
+  color: #fff;
+  font-size: max(11px, calc(24 * var(--uiw-u)));
+  line-height: 1;
+  animation: rw-bang 1s ease-in-out infinite;
+}
+.rw-bang[hidden] {
+  display: none;
+}
+@keyframes rw-bang {
+  50% {
+    transform: scale(1.15);
+  }
+}
+.rw-line {
+  flex: 1 1 calc(60 * var(--uiw-u));
+  min-width: 12px;
+  height: max(2px, calc(3 * var(--uiw-u)));
+  border-radius: 2px;
+  background: #77777c;
+}
+.rw-msg {
+  flex: 0 1 auto;
+  min-width: 0;
+  text-align: right;
+  font-size: max(11px, calc(24 * var(--uiw-u)));
+  line-height: 1.15;
+  color: #7dff5a;
+  --ow: 2.5;
+}
+
+/* A strip of cards between the two arrows. */
+.rw-row {
+  display: flex;
+  align-items: center;
+  gap: calc(10 * var(--uiw-u));
+}
+.rw-strip {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: calc(12 * var(--uiw-u));
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  padding: calc(4 * var(--uiw-u)) 0;
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
+}
+.rw-strip::-webkit-scrollbar {
+  display: none;
+}
+.rw-arrow {
+  flex: none;
+  width: max(36px, calc(62 * var(--uiw-u)));
+  height: max(44px, calc(96 * var(--uiw-u)));
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: max(2px, calc(4.5 * var(--uiw-u))) solid #1d1a22;
+  border-radius: calc(14 * var(--uiw-u));
+  background: linear-gradient(#fff07a, #ffd51f 50%, #f5b800);
+  box-shadow: inset 0 calc(-6 * var(--uiw-u)) 0 rgba(160, 90, 0, 0.35);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.15s, transform 0.1s;
+}
+.rw-arrow svg {
+  width: 70%;
+  height: 70%;
+}
+.rw-arrow path {
+  fill: none;
+  stroke: #1d1a22;
+  stroke-width: 6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.rw-arrow:active {
+  transform: scale(0.94);
+}
+.rw-arrow.off {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* One card (+ its button under it for playtime). */
+.rw-cell {
+  flex: 0 0 calc(262 * var(--uiw-u));
+  display: flex;
+  flex-direction: column;
+  gap: calc(8 * var(--uiw-u));
+  scroll-snap-align: start;
+}
+.rw-cell.wide {
+  flex-basis: calc(536 * var(--uiw-u));
+}
+.rw-cell .rw-card {
+  height: calc(268 * var(--uiw-u));
+  min-height: 112px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.rw-cell.play .rw-card {
+  height: calc(222 * var(--uiw-u));
+  min-height: 96px;
+}
+.rw-cell.claimed .rw-card > :not(.rw-btn) {
+  filter: saturate(0.35) brightness(0.85);
+}
+.rw-cell.today .rw-card {
+  box-shadow:
+    inset 0 0 0 max(1px, calc(4 * var(--uiw-u))) rgba(255, 255, 255, 0.6),
+    0 0 0 max(2px, calc(4 * var(--uiw-u))) #fff36b;
+}
+.rw-title {
+  position: relative;
+  margin-top: calc(10 * var(--uiw-u));
+  font-size: max(14px, calc(40 * var(--uiw-u)));
+  line-height: 1;
+  color: #fff;
+  --ow: 4;
+  white-space: nowrap;
+}
+.rw-art {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 70%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 calc(4 * var(--uiw-u)) 0 rgba(0, 0, 0, 0.25));
+}
+.rw-cell.wide .rw-art {
+  width: 40%;
+}
+.rw-art svg {
+  height: 100%;
+  max-height: calc(120 * var(--uiw-u));
+  width: auto;
+  max-width: 100%;
+  animation: rw-bob 2.4s ease-in-out infinite;
+}
+.rw-cell.play .rw-art svg {
+  max-height: calc(110 * var(--uiw-u));
+}
+@keyframes rw-bob {
+  50% {
+    transform: translateY(calc(-5 * var(--uiw-u))) rotate(-2deg);
+  }
+}
+.rw-time {
+  position: absolute;
+  right: -12%;
+  bottom: 4%;
+  transform: rotate(-9deg);
+  font-size: max(9px, calc(24 * var(--uiw-u)));
+  font-style: italic;
+  line-height: 1;
+  color: #ffd23a;
+  --ow: 3;
+  white-space: nowrap;
+}
+.rw-name {
+  position: relative;
+  padding: 0 calc(6 * var(--uiw-u));
+  margin-bottom: calc(6 * var(--uiw-u));
+  font-size: max(11px, calc(29 * var(--uiw-u)));
+  line-height: 1;
+  color: #fff;
+  --ow: 3.5;
+  text-align: center;
+  white-space: nowrap;
+}
+.rw-name.long {
+  font-size: max(10px, calc(23 * var(--uiw-u)));
+}
+.rw-name.k-gear,
+.rw-name.k-egg {
+  color: #ffd23a;
+}
+.rw-cell.daily .rw-name {
+  margin-bottom: calc(4 * var(--uiw-u));
+}
+
+/* Buttons: CLAIM! (go), LOCKED, CLAIMED (done), a countdown (wait). */
+.rw-btn {
+  position: relative;
+  width: 100%;
+  height: calc(54 * var(--uiw-u));
+  min-height: 34px;
+  padding: 0 0 calc(4 * var(--uiw-u));
+  border: max(2px, calc(4 * var(--uiw-u))) solid #1d1a22;
+  border-radius: calc(12 * var(--uiw-u));
+  font: inherit;
+  font-size: max(12px, calc(28 * var(--uiw-u)));
+  line-height: 1;
+  color: #fff;
+  --ow: 3;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  background: linear-gradient(#45ff5c, #2be04b 45%, #20d044);
+  box-shadow: inset 0 calc(-6 * var(--uiw-u)) 0 #1b7d01;
+  transition: transform 0.08s;
+}
+.rw-cell.daily .rw-btn {
+  width: 92%;
+  margin-bottom: calc(10 * var(--uiw-u));
+  flex: none;
+}
+.rw-cell.play .rw-btn {
+  height: calc(52 * var(--uiw-u));
+  min-height: 40px;
+}
+.rw-btn:active {
+  transform: translateY(calc(3 * var(--uiw-u))) scale(0.98);
+}
+.rw-btn.go {
+  animation: rw-go 1.1s ease-in-out infinite;
+}
+@keyframes rw-go {
+  50% {
+    filter: brightness(1.15);
+  }
+}
+.rw-btn.locked {
+  background: linear-gradient(#ff4a4b, #f23233 45%, #dc2223);
+  box-shadow: inset 0 calc(-6 * var(--uiw-u)) 0 #9e1312;
+}
+.rw-btn.done {
+  background: linear-gradient(#b9bec6, #9aa1ab 50%, #8a919c);
+  box-shadow: inset 0 calc(-6 * var(--uiw-u)) 0 #5c626c;
+  cursor: default;
+}
+.rw-btn.wait {
+  background: linear-gradient(#5b6170, #474c59 50%, #3c414d);
+  box-shadow: inset 0 calc(-6 * var(--uiw-u)) 0 #262a33;
+  color: #ffe680;
+  font-variant-numeric: tabular-nums;
+}
+.rw-btn:disabled {
+  filter: brightness(0.9);
+}
+
+/* --- Free Reward window -------------------------------------------------------------------- */
+.w-free {
+  --uiw-w: 640;
+  --uiw-h: 660;
+}
+.w-free .uiw-body {
+  padding: calc(28 * var(--uiw-u)) calc(26 * var(--uiw-u)) calc(26 * var(--uiw-u));
+  gap: calc(12 * var(--uiw-u));
+  align-items: center;
+}
+.fr-card {
+  width: 100%;
+  height: calc(268 * var(--uiw-u));
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.fr-art {
+  position: relative;
+  height: 55%;
+  display: flex;
+  align-items: center;
+  filter: drop-shadow(0 calc(5 * var(--uiw-u)) 0 rgba(0, 0, 0, 0.25));
+}
+.fr-art svg {
+  height: 100%;
+  width: auto;
+  animation: rw-bob 2.4s ease-in-out infinite;
+}
+.fr-name {
+  position: relative;
+  margin-top: calc(10 * var(--uiw-u));
+  font-size: max(16px, calc(54 * var(--uiw-u)));
+  line-height: 1;
+  color: #8dff5a;
+  --ow: 5;
+  white-space: nowrap;
+}
+.fr-steps {
+  width: 92%;
+  display: flex;
+  flex-direction: column;
+  gap: calc(8 * var(--uiw-u));
+}
+.fr-step {
+  display: flex;
+  align-items: center;
+  gap: calc(14 * var(--uiw-u));
+  min-height: 44px;
+  height: calc(60 * var(--uiw-u));
+  padding: 0 calc(10 * var(--uiw-u));
+  border: max(2px, calc(3 * var(--uiw-u))) solid #4c4c52;
+  border-radius: calc(12 * var(--uiw-u));
+  background: #262629;
+  color: #fff;
+  font: inherit;
+  font-size: max(13px, calc(28 * var(--uiw-u)));
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.fr-step:active {
+  transform: scale(0.98);
+}
+.fr-step.done {
+  border-color: #3bd36a;
+  background: #1f3326;
+}
+.fr-num {
+  flex: none;
+  width: max(26px, calc(46 * var(--uiw-u)));
+  height: max(26px, calc(46 * var(--uiw-u)));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: calc(10 * var(--uiw-u));
+  background: linear-gradient(#cfd4dc, #9aa1ab);
+  border: max(2px, calc(3 * var(--uiw-u))) solid #1d1a22;
+  color: #1d1a22;
+  font-size: max(13px, calc(28 * var(--uiw-u)));
+}
+.fr-step.done .fr-num {
+  background: none;
+  border: 0;
+}
+.fr-num svg {
+  width: 100%;
+  height: 100%;
+}
+.fr-ico {
+  width: max(16px, calc(30 * var(--uiw-u)));
+  height: max(16px, calc(30 * var(--uiw-u)));
+  margin-left: calc(-6 * var(--uiw-u));
+}
+.fr-hint {
+  font-size: max(12px, calc(26 * var(--uiw-u)));
+  color: #ffe08a;
+  --ow: 2.5;
+}
+.fr-claim {
+  width: 62%;
+  height: calc(86 * var(--uiw-u));
+  min-height: 46px;
+  padding: 0 0 calc(6 * var(--uiw-u));
+  border: max(2px, calc(5 * var(--uiw-u))) solid #1d1a22;
+  border-radius: calc(18 * var(--uiw-u));
+  font: inherit;
+  font-size: max(18px, calc(48 * var(--uiw-u)));
+  line-height: 1;
+  color: #fff;
+  --ow: 4;
+  background: linear-gradient(#45ff5c, #2be04b 45%, #20d044);
+  box-shadow: inset 0 calc(-7 * var(--uiw-u)) 0 #1b7d01;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.fr-claim:active {
+  transform: translateY(calc(3 * var(--uiw-u))) scale(0.98);
+}
+.fr-claim.wait {
+  filter: saturate(0.45) brightness(0.85);
+}
+.fr-claim.done {
+  background: linear-gradient(#b9bec6, #9aa1ab 50%, #8a919c);
+  box-shadow: inset 0 calc(-7 * var(--uiw-u)) 0 #5c626c;
+}
+
+/* --- Phones ------------------------------------------------------------------------------------- */
+/* Portrait: a narrower frame (bigger cards, about two and a half per row); the arrows and a swipe
+   scroll the rest. */
+.w-rewards .uiw-title h2 {
+  white-space: nowrap;
+}
+@media (orientation: portrait) and (max-width: 900px) {
+  .w-rewards {
+    --uiw-w: 760;
+    --uiw-h: 900;
+  }
+  .w-rewards .uiw-title h2 {
+    font-size: calc(50 * var(--uiw-u));
+  }
+  .w-rewards .uiw-title-icon {
+    width: calc(60 * var(--uiw-u));
+    height: calc(60 * var(--uiw-u));
+  }
+  .rw-head {
+    flex-wrap: wrap;
+    padding: 0 calc(20 * var(--uiw-u));
+    row-gap: 4px;
+  }
+  .rw-msg {
+    flex-basis: 100%;
+    text-align: left;
+  }
+  .rw-line {
+    display: none;
+  }
+}
+/* Short landscape screens: tighter spacing, and the playtime button sits inside its card like the
+   daily ones (the whole card is the tap target, rewardsUi.js), so both rows fit without scrolling. */
+@media (max-height: 500px) {
+  .w-rewards {
+    --uiw-h: 640;
+  }
+  .w-rewards .uiw-body {
+    padding-top: calc(40 * var(--uiw-u));
+    padding-bottom: calc(14 * var(--uiw-u));
+    gap: calc(6 * var(--uiw-u));
+  }
+  .rw-head {
+    min-height: 0;
+  }
+  .rw-head + .rw-row {
+    margin-bottom: calc(4 * var(--uiw-u));
+  }
+  .rw-msg {
+    font-size: max(10px, calc(22 * var(--uiw-u)));
+  }
+  .rw-cell .rw-card,
+  .rw-cell.play .rw-card {
+    min-height: 0;
+    height: calc(250 * var(--uiw-u));
+  }
+  .rw-cell.play {
+    position: relative;
+  }
+  .rw-cell.play .rw-btn {
+    position: absolute;
+    left: 4%;
+    width: 92%;
+    bottom: calc(12 * var(--uiw-u));
+    height: calc(50 * var(--uiw-u));
+    min-height: 26px;
+  }
+  .rw-cell.play .rw-name {
+    margin-bottom: max(calc(66 * var(--uiw-u)), calc(12 * var(--uiw-u) + 32px));
+  }
+  .rw-cell.daily .rw-btn {
+    min-height: 26px;
+  }
+  .rw-arrow {
+    min-height: 40px;
+  }
+}

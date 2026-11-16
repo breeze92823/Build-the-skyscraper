@@ -530,3 +530,121 @@ export function eggWobble(dur = 1.6) {
   }
   crinkle({ t: t + dur * 0.6, n: 6, dur: dur * 0.35, gain: 0.03, f0: 3000, f1: 7000 })
 }
+
+// --- Rewards (Daily & Playtime, Free Reward) + the Pets window ---------------------------------------
+// The prize itself, after the claim fanfare: cash pours, a boost charges up, gear clanks into its case,
+// an egg bubbles (the hatch show takes over from there).
+function prizeLayer(t, kind) {
+  if (kind === 'cash') {
+    coins(t, COARSE_POINTER ? 7 : 12, 0.5, 0.1)
+    modal({ t, f: 1046, modes: BELL, gain: 0.14, beat: 4, strike: 0.2, verb: 0.15 })
+  } else if (kind === 'boost') {
+    // Charge-up: a rising filtered sweep with sparks on top, landing on a bright fifth.
+    burst({ t, noise: 'pink', f: 250, f2: 4200, q: 1.6, a: 0.35, d: 0.08, gain: 0.2 })
+    tone({ t, type: 'sawtooth', f: 180, f2: 720, glide: 0.4, a: 0.05, hold: 0.3, d: 0.12, gain: 0.035, lp: 2400 })
+    for (let i = 0; i < (COARSE_POINTER ? 6 : 12); i++) burst({ t: t + 0.25 + Math.random() * 0.25, type: 'highpass', f: rnd(3000, 6000), q: 0.7, a: 0.0004, d: rnd(0.003, 0.009), gain: rnd(0.05, 0.1), pan: rnd(-0.5, 0.5) })
+    glock(t + 0.42, [7, 12, 19], 0.05, 0.13, 0.3)
+  } else if (kind === 'gear') {
+    // Heavy steel plates locking together, a servo whir, a power-on chime.
+    modal({ t, f: vary(330, 0.04), modes: TROPHY, gain: 0.2, decay: 0.7, strike: 0.5, beat: 3, verb: 0.2 })
+    tone({ t, f: 95, f2: 48, d: 0.14, gain: 0.32 })
+    burst({ t, type: 'lowpass', f: 900, q: 0.7, d: 0.08, gain: 0.25 })
+    tone({ t: t + 0.12, type: 'square', f: 420, f2: 880, glide: 0.25, a: 0.02, hold: 0.12, d: 0.08, gain: 0.025, lp: 1800 })
+    modal({ t: t + 0.36, f: vary(520, 0.04), modes: TROPHY, gain: 0.16, decay: 0.5, strike: 0.5, beat: 3, verb: 0.2 })
+    glock(t + 0.5, [0, 7, 12, 16], 0.06, 0.13, 0.3)
+  } else if (kind === 'egg') {
+    bubble({ t, f: 380, d: 0.08, gain: 0.3, rise: 1.3 })
+    glock(t + 0.06, [4, 7, 11], 0.07, 0.11)
+  }
+}
+
+// Claiming any reward card: the lid pops, confetti poppers either side, then the prize layer.
+// `big` (Day 7, the Free Reward) adds a glockenspiel run and the crowd.
+export function rewardClaim(kind = 'cash', big = false) {
+  if (!voice(big ? 3 : 1.8, 4)) return
+  claim()
+  const t = now()
+  tone({ t, f: 900, f2: 220, glide: 0.035, d: 0.06, gain: 0.3 })
+  burst({ t, f: 2500, q: 1, d: 0.01, gain: 0.2 })
+  popper(t + 0.04, -0.5)
+  popper(t + 0.09, 0.5)
+  prizeLayer(t + 0.16, kind)
+  if (big) {
+    glock(t + 0.2, [0, 4, 7, 12, 16, 19, 24], 0.06, 0.14, 0.35)
+    applause(2.2, 0.75, t + 0.25)
+  }
+  buzz(big ? [30, 50, 30, 50, 70] : [25, 40, 40])
+}
+
+// Pressing a LOCKED card: the padlock rattles against its hasp, a dull knock.
+export function lockedTap() {
+  if (!limit('locked', 160) || !voice(0.35, 2)) return
+  claim()
+  const t = now()
+  for (let i = 0; i < 3; i++) modal({ t: t + i * 0.045, f: vary(2100, 0.05), modes: COIN, gain: 0.07 - i * 0.015, decay: 0.2, strike: 0.5, beat: 9, bus: A.ui })
+  modal({ t: t + 0.02, f: vary(190, 0.03), modes: WOOD, gain: 0.35, strike: 0.15, bus: A.ui })
+  buzz(20)
+}
+
+// The < > arrows: a card strip sliding along felt (dir -1 left, 1 right).
+export function pageFlip(dir = 1) {
+  if (!limit('page', 70) || !voice(0.25, 1)) return
+  const t = now()
+  const pan = dir * 0.35
+  burst({ t, noise: 'pink', f: dir > 0 ? 900 : 2200, f2: dir > 0 ? 2600 : 800, q: 1, a: 0.03, d: 0.12, gain: 0.2, pan, bus: A.ui })
+  modal({ t: t + 0.09, f: vary(1500, 0.05), modes: PLASTIC, gain: 0.08, pan, bus: A.ui })
+}
+
+// Ticking a Free Reward step: a pen tick and a rising glockenspiel note (i = 0, 1, 2).
+export function stepCheck(i = 0) {
+  if (!voice(0.8, 2)) return
+  claim()
+  const t = now()
+  burst({ t, f: 5200, q: 2, a: 0.002, d: 0.025, gain: 0.12, bus: A.ui })
+  burst({ t: t + 0.04, f: 3600, f2: 6000, q: 2, a: 0.004, d: 0.05, gain: 0.1, bus: A.ui })
+  glock(t + 0.05, [[0, 4], [4, 7], [7, 12]][Math.min(2, i)], 0.07, 0.13, 0.25, A.ui)
+}
+
+// A playtime reward just became ready: a two-note notification ding.
+export function rewardReady() {
+  if (!limit('ready', 1500) || !voice(1, 2)) return
+  const t = now()
+  glock(t, [7, 16], 0.11, 0.12, 0.3, A.ui)
+  modal({ t: t + 0.11, f: C6 * semi(4), modes: BELL, gain: 0.05, decay: 0.8, verb: 0.3, bus: A.ui })
+}
+
+// A timed boost ran out: a soft falling pair and air leaving.
+export function boostEnd() {
+  if (!limit('boostEnd', 600) || !voice(0.9, 2)) return
+  const t = now()
+  glock(t, [12, 5], 0.12, 0.09, 0.3, A.ui)
+  burst({ t: t + 0.05, noise: 'pink', f: 2200, f2: 400, q: 0.9, a: 0.04, d: 0.3, gain: 0.08, bus: A.ui })
+}
+
+// SELL in the Pets window: the till rings and coins (more for pricier pets, `k` 0..1).
+export function sell(k = 0.3) {
+  if (!limit('sell', 90) || !voice(1, 3)) return
+  claim()
+  const t = now()
+  modal({ t, f: vary(1320, 0.03), modes: BELL, gain: 0.12, beat: 4, strike: 0.25, verb: 0.12 })
+  coins(t + 0.04, Math.round((COARSE_POINTER ? 3 : 4) + k * (COARSE_POINTER ? 4 : 8)), 0.25 + k * 0.25, 0.08)
+}
+
+// A delete / sell tap that still needs a second tap to go through: a little warning blip.
+export function confirmTap() {
+  if (!limit('confirm', 80) || !voice(0.2, 2)) return
+  const t = now()
+  tone({ t, type: 'triangle', f: 660, d: 0.05, gain: 0.08, bus: A.ui })
+  tone({ t: t + 0.07, type: 'triangle', f: 520, d: 0.06, gain: 0.08, bus: A.ui })
+}
+
+// +1 SLOT bought: the till, then a padlock springing open and a sparkle.
+export function slotBuy() {
+  if (!voice(1.6, 3)) return
+  purchase()
+  claim()
+  const t = now() + 0.25
+  modal({ t, f: vary(1900, 0.03), modes: COIN, gain: 0.12, decay: 0.35, strike: 0.4, beat: 9, bus: A.ui })
+  burst({ t, noise: 'pink', f: 400, f2: 2600, q: 0.9, a: 0.1, d: 0.2, gain: 0.12 })
+  glock(t + 0.1, [0, 7, 12, 19], 0.06, 0.12)
+}

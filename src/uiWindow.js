@@ -108,15 +108,17 @@ export function createWindow({ title, icon = '', className = '', onOpen, onClose
   document.body.append(overlay)
 
   let shown = false
+  let locked = false // a modal window: Esc / the X / a tap outside do not close it, only close(true) does
   let closing = 0 // timer that hides the overlay once its close animation has played
   const win = {
     overlay,
     dialog,
     body,
     isOpen: () => shown,
+    lock: (on = true) => (locked = on),
     open() {
       if (shown) return
-      if (current && current !== win) current.close()
+      if (current && current !== win) current.close(true)
       // Sound first: the render + layout below can take a while on a phone, and the
       // whoosh should land with the press, not after it.
       sfx.windowOpen()
@@ -132,8 +134,8 @@ export function createWindow({ title, icon = '', className = '', onOpen, onClose
       cardsIn(body)
       document.exitPointerLock?.() // the cursor has to be free to press the buttons
     },
-    close() {
-      if (!shown) return
+    close(force = false) {
+      if (!shown || (locked && force !== true)) return
       sfx.windowClose()
       shown = false
       overlay.classList.add('closing') // juice.css: shrink + fade, then hidden
@@ -148,7 +150,7 @@ export function createWindow({ title, icon = '', className = '', onOpen, onClose
     toggle: () => (win.isOpen() ? win.close() : win.open()),
   }
 
-  closeBtn.addEventListener('click', win.close)
+  closeBtn.addEventListener('click', () => win.close())
   // A tap on the world around the window closes it.
   overlay.addEventListener('pointerdown', (e) => {
     if (e.target === overlay) win.close()

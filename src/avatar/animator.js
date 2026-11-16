@@ -32,6 +32,12 @@ class PlayerAnimator {
   constructor(root) {
     this.root = root
     this.rig = new PlayerRig(root)
+    // Emotes (emotes.js) layer over the pose: every node's bind rotation (this runs while the rig
+    // is still in its bind pose) and which bones this animator drives itself.
+    this.bind = new Map()
+    for (const name in root.nodes ?? {}) this.bind.set(name, root.nodes[name].quaternion.clone())
+    this.driven = new Set(this.rig.bindings.map((b) => b.bone))
+    this.overlay = null // (dt, animator) => void, called after the base pose is applied
     this.target = new PoseBuffer()
     this.from = new PoseBuffer()
     this.output = new PoseBuffer()
@@ -60,6 +66,7 @@ class PlayerAnimator {
     this.writePose(dt, input)
     this.blend(dt)
     this.rig.applyPose(this.output)
+    this.overlay?.(dt, this)
     this.applyVisual(dt, input)
   }
 
@@ -69,6 +76,18 @@ class PlayerAnimator {
       this.setState('bench', ANIM.transitions.toLocomotion)
       return
     }
+    // Robot Gear superhero landing: a crouch whose depth (input.impact) the gear code drives.
+    if (input.activity === 'impact') {
+      this.airTime = 0
+      this.setState('impact', ANIM.impact.blend)
+      return
+    }
+    // Hanging in a parachute harness: hands up on the steering toggles, legs dangling.
+    if (input.activity === 'chute') {
+      this.airTime = 1
+      this.setState('chute', ANIM.chute.blend)
+      return
+    }
     if (!input.grounded) {
       // Ignore the few frames of a step down a ledge; only a real drop is airborne.
       this.airTime += dt
@@ -76,7 +95,7 @@ class PlayerAnimator {
       return
     }
     this.airTime = 0
-    if (this.state === 'airborne') {
+    if (this.state === 'airborne' || this.state === 'chute') {
       this.setState('landing', ANIM.transitions.toLanding)
       return
     }
@@ -120,6 +139,28 @@ class PlayerAnimator {
         t.applyDefinition(ANIM.airborne.fall)
         this.scratch.applyDefinition(ANIM.airborne.rise)
         t.lerpBetween(t, this.scratch, clamp(0.5 + rising * 0.5, 0, 1))
+        t.bobY = 0
+        break
+      }
+      case 'impact': {
+        const d = clamp(input.impact ?? 0, 0, 1)
+        t.applyDefinition(ANIM.impact.pose, d)
+        t.bobY = ANIM.impact.bobY * d
+        break
+      }
+      case 'chute': {
+        // input.flare 0..1: the toggles pulled down to the hips and the legs out front for touchdown.
+        const C = ANIM.chute
+        t.applyDefinition(C.hang)
+        this.scratch.applyDefinition(C.flare)
+        t.lerpBetween(t, this.scratch, clamp(input.flare ?? 0, 0, 1))
+        const sw = Math.sin(this.stateTime * C.swayRate * TAU)
+        const kick = Math.sin(this.stateTime * C.swayRate * 1.7 * TAU + 1.3)
+        t.add('LegL1', sw * C.legSway, 0, 0)
+        t.add('LegR1', -sw * C.legSway * 0.8, 0, 0)
+        t.add('LegL2', Math.max(0, kick) * C.legSway, 0, 0)
+        t.add('LegR2', Math.max(0, -kick) * C.legSway, 0, 0)
+        t.add('Neck1', -0.1 + sw * 0.04, sw * 0.12, 0)
         t.bobY = 0
         break
       }

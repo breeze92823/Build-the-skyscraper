@@ -21,7 +21,7 @@ import { blockMaterial } from './site.js'
 // Everything that makes an avatar a construction worker: a hi-vis vest and hard hat, a
 // carrying frame on the back that fills with stone blocks as the bag fills, muscles that
 // bulk up with Strength, and a floating name tag with the rank. Works on the Bloxity rig
-// (player.glb) and on the procedural fallback / worker bots, which share bone names.
+// (player.glb) and on the procedural fallback / the Robot Gear hall's mannequins, which share bone names.
 // Accessories are built in rig units and fixed to bones in the bind pose, so they follow
 // every animation.
 
@@ -51,6 +51,8 @@ const hatMats = {}
 function hatMaterial(color) {
   return hatMats[color] || (hatMats[color] = new MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.05 }))
 }
+// The hard hat's headlamp glass, shared by every worker: nightLights.js turns it up after dark.
+export const headlampMaterial = new MeshStandardMaterial({ color: '#fff8e6', emissive: '#fff1d6', emissiveIntensity: 0.15, roughness: 0.2 })
 const frameMat = new MeshStandardMaterial({ color: '#ffc21a', roughness: 0.5, metalness: 0.2 })
 const strapMat = new MeshStandardMaterial({ color: '#2b2d33', roughness: 0.8 })
 
@@ -146,7 +148,17 @@ export function dressWorker(root, { hat = '#ffd21a', vest = true } = {}) {
     brim.position.set(0, -0.02, 0.15)
     const ridge = new Mesh(new BoxGeometry(0.22, 0.25, 1.9), hatMaterial(hat))
     ridge.position.y = 0.88
-    h.add(dome, brim, ridge)
+    // Headlamp on the front of the dome (the light itself follows the player in nightLights.js).
+    const lamp = new Group()
+    lamp.name = 'headlamp'
+    lamp.position.set(0, 0.42, 0.86)
+    lamp.rotation.x = -0.45
+    const body = new Mesh(new BoxGeometry(0.52, 0.38, 0.22), strapMat)
+    const lens = new Mesh(new CylinderGeometry(0.15, 0.15, 0.06, 14), headlampMaterial)
+    lens.rotation.x = Math.PI / 2
+    lens.position.z = 0.13
+    lamp.add(body, lens)
+    h.add(dome, brim, ridge, lamp)
     attach(root, 'Neck1', h, new Vector3(0, 6.18, 0))
   }
   const pack = makeBackpack()
@@ -261,14 +273,14 @@ export function makeNameTag(name, rankIndex, { you = false } = {}) {
   }
 }
 
-// --- Worker bots' bodies ----------------------------------------------------------------------------
+// --- Worker bodies (the Robot Gear hall's display mannequins) ----------------------------------------------------------------------------
 const SKINS = ['#f2c79a', '#d9a273', '#a8724a', '#7a4e2e', '#ffd9b3']
 const HAIRS = ['#3a2516', '#1d1d1f', '#8a5a2b', '#d9b25a', '#b5432a']
 const SHIRTS = ['#2f6fd0', '#3a3d46', '#2fae5a', '#7a3dd1', '#d63a2a', '#1aa3b8']
 const PANTS = ['#2b3a5a', '#3b3b40', '#4a3a2a', '#26324a']
 const faceMat = new MeshStandardMaterial({ color: '#1d1d1f', roughness: 0.5 })
 
-export function makeBotBody(seed) {
+export function makeWorkerBody(seed) {
   const pick = (list, k) => list[(seed * 7 + k * 3) % list.length]
   const root = buildDefaultCharacter()
   const mats = {

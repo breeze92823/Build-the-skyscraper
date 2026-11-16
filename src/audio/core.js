@@ -42,7 +42,8 @@ try {
 } catch {
   // Storage blocked: unmuted.
 }
-const level = () => (muted ? 0 : volume * volume) // perceptual: the slider feels even
+let adMuted = false // an ad break is playing (bloxity ads.onBreakStart): silent, but not the player's saved choice
+const level = () => (muted || adMuted ? 0 : volume * volume) // perceptual: the slider feels even
 function applyLevel(t = 0.05) {
   if (A.master) A.master.gain.setTargetAtTime(level(), A.ctx.currentTime, t)
 }
@@ -51,6 +52,10 @@ export function setVolume(v) {
   applyLevel()
 }
 export const isMuted = () => muted
+export function setAdMuted(on) {
+  adMuted = !!on
+  applyLevel(0.02)
+}
 export function setMuted(on) {
   muted = !!on
   try {

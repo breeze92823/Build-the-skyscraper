@@ -1,12 +1,12 @@
 import './windows.css'
-import { DAILY, GYM, PET_PASSES, RANKS, SHOP, UPGRADES } from './config.js'
+import { GYM, PET_PASSES, RANKS, SHOP, UPGRADES } from './config.js'
 import { ICONS } from './hudIcons.js'
 import { burst, centre } from './juice.js'
 import { createWindow, replay, uiButton } from './uiWindow.js'
-import { buyPass, buyPetPass, buyUpgrade, claimDaily, commas, dailyStatus, emit, rankIndex, short, spend, state, upgradeDef } from './stats.js'
+import { buyPass, buyPetPass, buyUpgrade, commas, emit, rankIndex, short, spend, state, upgradeDef } from './stats.js'
 
 // The menu windows (all on the shared uiWindow shell): Shop (passes, instant blocks, premium
-// gym pads; everything for cash), Upgrades, Ranks, Daily rewards and the free gift reveal.
+// gym pads; everything for cash), Upgrades and Ranks. (Daily / Playtime / Free rewards: rewardsUi.js.)
 // Each window re-renders whenever it opens or something it shows changes.
 
 const money = (n) => `$${short(n)}`
@@ -118,13 +118,11 @@ export function createWindows({ onBoost, hud, say }) {
 
   // --- Upgrades --------------------------------------------------------------------------------------
   const upgrades = createWindow({ title: 'Upgrades', icon: ICONS.upgrades, className: 'w-upgrades', onOpen: () => renderUpgrades() })
-  function fmtVal(def, l) {
-    const v = def.value(l)
-    return def.unit === 'x' ? `${v.toFixed(2)}x` : `${Math.round(v * 10) / 10} ${def.unit}`
-  }
+  const fmtVal = (def, l) => def.fmt(def.value(l))
   function renderUpgrades() {
     const b = upgrades.body
     b.innerHTML = ''
+    b.append(el('div', 'w-cashbar', `<span class="w-ico">${ICONS.cash}</span><b class="uiw-text">${money(state.cash)}</b>`))
     const list = el('div', 'w-rows')
     for (const u of UPGRADES) {
       const def = upgradeDef(u.id)
@@ -133,14 +131,14 @@ export function createWindows({ onBoost, hud, say }) {
       const price = max ? 0 : def.price(lvl)
       const row = el(
         'div',
-        'w-row',
-        `<div class="w-ico">${ICONS[u.id] ?? ICONS.block}</div>
-         <div class="w-info"><div class="w-name">${u.name} <span class="w-lvl">Lv ${lvl}/${def.max}</span></div>
+        `w-row up-${u.color}`,
+        `<div class="w-uico"><div class="w-ico">${ICONS[u.id] ?? ICONS.block}</div><div class="w-lv uiw-text">Lv.${lvl}</div></div>
+         <div class="w-info"><div class="w-name uiw-text">${u.name}</div>
          <div class="w-desc">${u.desc}</div>
-         <div class="w-meter"><div style="width:${(lvl / def.max) * 100}%"></div></div>
-         <div class="w-val">${fmtVal(def, lvl)}${max ? '' : ` <span class="w-arrow">➜</span> <b>${fmtVal(def, lvl + 1)}</b>`}</div></div>`,
+         <div class="w-val uiw-text">${fmtVal(def, lvl)}${max ? ' <b>MAX</b>' : ` <span class="w-arrow">»</span> <b>${fmtVal(def, lvl + 1)}</b>`}</div></div>`,
       )
-      const btn = uiButton(max ? 'MAX' : money(price), max ? 'green' : state.cash >= price ? 'green' : 'red', () => {
+      // Cash only (never Gems/Robux): green when you can afford it, grey when you cannot.
+      const btn = uiButton(max ? 'MAX' : `<span class="w-cashico">${ICONS.cash}</span>${commas(price)}`, max || state.cash >= price ? 'green' : 'grey', () => {
         const r = buyUpgrade(u.id)
         if (r.need) {
           replay(btn, 'shake')
@@ -186,55 +184,12 @@ export function createWindows({ onBoost, hud, say }) {
     if (scroll) requestAnimationFrame(() => list.querySelector('.you')?.scrollIntoView({ block: 'center' }))
   }
 
-  // --- Daily ---------------------------------------------------------------------------------------------
-  const daily = createWindow({ title: 'Daily Rewards', icon: ICONS.daily, className: 'w-daily', onOpen: () => renderDaily() })
-  const rewardText = (r) => [r.cash && `$${short(r.cash)}`, r.strength && `+${short(r.strength)} Strength`, r.speed && `+${short(r.speed)} Speed`].filter(Boolean).join(' + ')
-  function renderDaily() {
-    const b = daily.body
-    b.innerHTML = ''
-    const st = dailyStatus()
-    const grid = el('div', 'dy-grid')
-    DAILY.forEach((r, i) => {
-      const claimed = i < st.index || (!st.canClaim && i === st.index)
-      const today = i === st.index && st.canClaim
-      const tile = el('div', `dy-tile${claimed ? ' claimed' : ''}${today ? ' today' : ''}`, `<div class="dy-day">Day ${i + 1}</div><div class="w-ico">${r.strength && !r.cash ? ICONS.strength : r.speed && !r.cash ? ICONS.speed : ICONS.cash}</div><div class="dy-r">${rewardText(r)}</div>${claimed ? `<div class="dy-check">${ICONS.check}</div>` : ''}`)
-      grid.append(tile)
-    })
-    b.append(grid)
-    const btns = el('div', 'uiw-btns')
-    const claim = uiButton(st.canClaim ? 'Claim!' : 'Come back<br>tomorrow', st.canClaim ? 'green' : 'red', () => {
-      const r = claimDaily()
-      if (!r) return replay(claim, 'shake')
-      burst(...centre(claim), 'big')
-      say(`Daily reward: ${rewardText(r)}!`, true)
-      renderDaily()
-    }, st.canClaim ? '' : 'small-text')
-    btns.append(claim)
-    b.append(btns)
-    b.append(el('div', 'w-note', `Streak: ${st.streak} day${st.streak === 1 ? '' : 's'}. Miss a day and it starts over.`))
-  }
-
-  // --- Gift reveal -----------------------------------------------------------------------------------------
-  const gift = createWindow({ title: 'Free Gift!', icon: ICONS.gift, className: 'w-gift' })
-  function showGift(reward) {
-    gift.body.innerHTML = ''
-    const box = el('div', 'gf-reveal', `<div class="gf-ico">${reward.icon}</div><div class="gf-text">${reward.text}</div>`)
-    gift.body.append(box)
-    const btns = el('div', 'uiw-btns')
-    btns.append(uiButton('Awesome!', 'green', () => gift.close()))
-    gift.body.append(btns)
-    gift.open()
-    requestAnimationFrame(() => burst(...centre(box), 'big'))
-  }
-
   void hud
   return {
     shop,
     openShopAt,
     upgrades,
     ranks,
-    daily,
-    showGift,
     setBlocksPerMin(v) {
       blocksPerMin = v
     },
