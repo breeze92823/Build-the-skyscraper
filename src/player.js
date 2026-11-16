@@ -169,7 +169,8 @@ function step(dt) {
 
   const F = player.fly
   if (F) {
-    const target = inputState.jumpHeld && player.position.y < F.maxY ? F.climb : player.grounded ? -2 : F.sink
+    // Hold Jump to climb, hold Descend (C / touch DOWN) to dive; Descend wins if both are held.
+    const target = inputState.descendHeld && !player.grounded ? F.dive : inputState.jumpHeld && player.position.y < F.maxY ? F.climb : player.grounded ? -2 : F.sink
     const dv = target - player.velocity.y
     player.velocity.y += Math.sign(dv) * Math.min(Math.abs(dv), F.accel * dt)
   } else if (C && !player.grounded) {

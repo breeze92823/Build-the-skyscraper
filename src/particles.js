@@ -51,7 +51,11 @@ const vertexShader = /* glsl */ `
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
     gl_Position = projectionMatrix * mv;
     float fade = smoothstep(0.0, 0.12, k) * (1.0 - smoothstep(0.55, 1.0, k));
-    float tw = uTwinkle > 0.0 ? 0.35 + 0.65 * pow(0.5 + 0.5 * sin(uTime * uTwinkle + rnd.x * 61.0), 3.0) : 1.0;
+    // Cubed by hand, not pow(): float rounding can push the base a hair below 0, and pow() of a negative
+    // number is NaN on some drivers (ANGLE / D3D, e.g. Firefox on Windows); with bloom on, the bloom blur
+    // spread those NaN pixels into big black boxes on screen (the roof sparks, seen on the building top).
+    float twb = clamp(0.5 + 0.5 * sin(uTime * uTwinkle + rnd.x * 61.0), 0.0, 1.0);
+    float tw = uTwinkle > 0.0 ? 0.35 + 0.65 * twb * twb * twb : 1.0;
     vAlpha = fade * tw;
     vTint = tint;
     float size = uSize * (0.65 + 0.35 * abs(rnd.y)) * mix(1.0, uGrow, k);

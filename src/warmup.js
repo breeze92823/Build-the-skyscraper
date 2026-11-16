@@ -52,12 +52,30 @@ export function createWarmup(renderer, scene, camera, postfx) {
     }
   }
 
-  // Compile `root`'s materials for the scene's lights/fog/environment and the real render target.
+  // Compile `root`'s materials for the scene's lights/fog/environment and the real render target, in
+  // both light states lightGate.js switches between: with every light on (night) and as the lights are
+  // now (last, so it is the variant in use). Each material keeps both programs, so the switch at dusk /
+  // dawn is a lookup, not a compile.
   function compile(root) {
     const prev = renderer.getRenderTarget()
     renderer.setRenderTarget(postfx.sceneTarget())
+    const off = []
+    scene.traverse((o) => {
+      if (o.isLight && !o.visible) off.push(o)
+    })
     try {
-      return renderer.compile(root, camera, scene)
+      let night = null
+      if (off.length) {
+        for (const l of off) l.visible = true
+        try {
+          night = renderer.compile(root, camera, scene)
+        } finally {
+          for (const l of off) l.visible = false
+        }
+      }
+      const now = renderer.compile(root, camera, scene)
+      if (night) for (const m of night) now.add(m)
+      return now
     } catch {
       return new Set()
     } finally {
@@ -81,7 +99,14 @@ export function createWarmup(renderer, scene, camera, postfx) {
     })
   }
 
-  const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()))
+  // Yield to the browser between batches. Not requestAnimationFrame: a background tab gets no frames,
+  // and loading must still finish there; a message-channel task runs (and lets the page paint) either way.
+  const yieldTask = () =>
+    new Promise((r) => {
+      const ch = new MessageChannel()
+      ch.port1.onmessage = () => r()
+      ch.port2.postMessage(0)
+    })
 
   async function full() {
     try {
@@ -99,7 +124,7 @@ export function createWarmup(renderer, scene, camera, postfx) {
         if (!needsUpload(t)) continue
         upload(t)
         if (performance.now() - t0 > 12) {
-          await nextFrame()
+          await yieldTask()
           t0 = performance.now()
         }
       }

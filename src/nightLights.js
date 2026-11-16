@@ -19,6 +19,7 @@ import {
 import { LAYOUT, NIGHT_LIGHTS, ROBOT_GEAR } from './config.js'
 import { box, cyl, solidBox, solidPole, std } from './propkit.js'
 import { mats } from './props.js'
+import { bakeStill } from './bake.js'
 import { headlampMaterial } from './characters.js'
 
 // Lights for the night, all fading in with the street lamps (lighting.onNightChange):
@@ -56,7 +57,8 @@ const beamFragment = /* glsl */ `
   varying float vAlong;
   varying float vFacing;
   void main() {
-    float a = opacity * pow(vAlong, 1.6) * pow(vFacing, 1.4);
+    // clamp: pow() of a value interpolated a hair below 0 is NaN on some drivers (black boxes with bloom).
+    float a = opacity * pow(clamp(vAlong, 0.0, 1.0), 1.6) * pow(clamp(vFacing, 0.0, 1.0), 1.4);
     gl_FragColor = vec4(color * a, 1.0);
   }`
 function beamMaterial(color, opacity) {
@@ -94,6 +96,7 @@ function haloTexture() {
   return haloTex
 }
 const haloMat = new SpriteMaterial({ map: null, color: '#ffffff', transparent: true, opacity: 0, depthWrite: false, blending: AdditiveBlending, fog: false })
+haloMat.visible = false // shown once night fades the halos in (setLevel)
 
 // A lamp head facing +z: `cols` x `rows` lamp panels on a bar, each with a lens and a halo.
 function makeHead(cols, rows, size = 0.8) {
@@ -113,6 +116,7 @@ function makeHead(cols, rows, size = 0.8) {
       g.add(halo)
     }
   }
+  bakeStill([g], () => {}, 0) // the head's parts never move against it: one mesh per material (the head itself still aims)
   return g
 }
 
@@ -347,6 +351,7 @@ export function createNightLights({ scene, lighting, tower, cranes, hall, preset
     lensMat.emissiveIntensity = 0.1 + f * 5
     headlampMaterial.emissiveIntensity = 0.15 + f * 5
     haloMat.opacity = Math.min(1, f * 0.9)
+    haloMat.visible = haloMat.opacity > 0.001 // fully faded by day: skip the draw calls
     for (const m of beamMats.values()) m.uniforms.opacity.value = m.userData.max * f
     const on = f > 0.02
     for (const b of beams) b.mesh.visible = on

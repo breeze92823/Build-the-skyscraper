@@ -324,8 +324,12 @@ export function buildLock(S, height, color) {
         float h = vUv.y;
         vec2 p = vec2(vUv.x * 26.0, h * 6.0);
         float cells = smoothstep(0.92, 1.0, abs(sin((p.x + p.y) * 3.14159))) + smoothstep(0.92, 1.0, abs(sin((p.x - p.y) * 3.14159)));
-        float band = exp(-pow((fract(h * 0.8 - uTime * 0.35) - 0.5) * 8.0, 2.0));
-        float base = pow(1.0 - h, 2.0);
+        // Squared by hand: pow() of a negative base is NaN on some drivers (ANGLE / D3D), which bloom
+        // turns into black boxes on screen.
+        float bd = (fract(h * 0.8 - uTime * 0.35) - 0.5) * 8.0;
+        float band = exp(-bd * bd);
+        float hb = clamp(1.0 - h, 0.0, 1.0);
+        float base = hb * hb;
         float a = base * (0.16 + 0.4 * cells) + band * 0.3 * (1.0 - h) + smoothstep(0.05, 0.0, h) * 0.5;
         gl_FragColor = vec4(uColor * (1.4 + band * 1.5), a * uOpacity);
         #include <tonemapping_fragment>

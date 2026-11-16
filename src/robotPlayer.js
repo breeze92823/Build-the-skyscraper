@@ -642,7 +642,7 @@ export function createRobotPlayer({ scene, hall, tower, interact, hud, fx, say, 
   let refreshT = 0
   let flyThrust = 0 // the thrusters' power this frame (the pose act 'fly' tells the others)
   const flyCache = new Map()
-  const flyParams = (def) => flyCache.get(def.id) ?? flyCache.set(def.id, { climb: def.fly.climb, sink: def.fly.sink, accel: ROBOT.flyAccel, maxY: ROBOT.flyMaxY }).get(def.id)
+  const flyParams = (def) => flyCache.get(def.id) ?? flyCache.set(def.id, { climb: def.fly.climb, sink: def.fly.sink, dive: def.fly.dive ?? ROBOT.fly.dive, accel: ROBOT.flyAccel, maxY: ROBOT.flyMaxY }).get(def.id)
   return {
     ability,
     get form() {
@@ -732,6 +732,7 @@ export function createRobotPlayer({ scene, hall, tower, interact, hud, fx, say, 
       // Flying: the jet, or gear that flies in robot form.
       const jet = form === 'vehicle' && !tf && vehicle?.kind === 'jet'
       player.fly = jet ? ROBOT.fly : form === 'robot' && !tf && worn && def?.fly ? flyParams(def) : null
+      document.body.classList.toggle('flying', !!player.fly) // shows the touch DOWN button
 
       readMotion(dt)
 

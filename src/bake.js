@@ -1,4 +1,4 @@
-import { Group, Matrix4, Mesh } from 'three'
+import { BufferAttribute, Group, Matrix4, Mesh, Skeleton, SkinnedMesh, Sphere } from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
 // --- Baking: one mesh per material ------------------------------------------------
@@ -130,4 +130,106 @@ export function bakeStill(roots, probe, runs = 8) {
     }
   }
   return removed // draw calls saved
+}
+
+// --- Rigid skinning: animated pieces in a few draw calls ---------------------------------
+// Every opaque part under `root` is merged, per exact material, into ONE SkinnedMesh whose bones are the
+// original parts themselves. The animation code keeps moving / scaling / showing / hiding the original
+// objects exactly as before; each frame the skinned mesh follows their matrices on the GPU, and a part
+// that is hidden (its own `visible` or any parent's, up to `root`) collapses to nothing. So the picture
+// and the animation are unchanged while hundreds of parts cost one draw call per material. The
+// originals stay in the scene as transforms only (layers.mask 0: never drawn). Parts whose geometry is
+// rewritten at run time do not belong here (none in the Robot Gear hall).
+function attachedShown(o, root) {
+  for (let p = o; p !== root; p = p.parent) if (!p || !p.visible) return false
+  return root.visible
+}
+export function bakeRigid(root, margin = 8) {
+  root.updateMatrixWorld(true)
+  const inv = new Matrix4().copy(root.matrixWorld).invert()
+  const groups = new Map()
+  root.traverse((o) => {
+    if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh || o.children.length) return
+    const m = o.material
+    if (!m || Array.isArray(m) || m.transparent || o.geometry.morphAttributes.position) return
+    if (Object.prototype.hasOwnProperty.call(o, 'onBeforeRender')) return
+    const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()
+    const rel = new Matrix4().multiplyMatrices(inv, o.matrixWorld)
+    g.applyMatrix4(rel)
+    if (rel.determinant() < 0) flipWinding(g)
+    g.morphAttributes = {}
+    g.clearGroups()
+    const key = [m.uuid, o.castShadow, o.receiveShadow, o.renderOrder, Object.keys(g.attributes).sort().map((n) => n + g.attributes[n].itemSize).join(',')].join('|')
+    let e = groups.get(key)
+    if (!e) groups.set(key, (e = { o, parts: [] }))
+    e.parts.push({ o, g })
+  })
+  let saved = 0
+  for (const { o: first, parts } of groups.values()) {
+    if (parts.length < 2) {
+      for (const p of parts) p.g.dispose()
+      continue
+    }
+    parts.forEach(({ g }, i) => {
+      const n = g.attributes.position.count
+      const idx = new Uint16Array(n * 4)
+      const w = new Float32Array(n * 4)
+      for (let v = 0; v < n; v++) {
+        idx[v * 4] = i
+        w[v * 4] = 1
+      }
+      g.setAttribute('skinIndex', new BufferAttribute(idx, 4))
+      g.setAttribute('skinWeight', new BufferAttribute(w, 4))
+    })
+    const merged = mergeGeometries(parts.map((p) => p.g))
+    for (const p of parts) p.g.dispose()
+    if (!merged) continue
+    const bones = parts.map((p) => p.o)
+    const skeleton = new Skeleton(bones) // inverses from the parts' current (bind) matrices
+    const baseUpdate = skeleton.update.bind(skeleton)
+    skeleton.update = function () {
+      baseUpdate()
+      const bm = this.boneMatrices
+      for (let i = 0; i < bones.length; i++) if (!attachedShown(bones[i], root)) bm.fill(0, i * 16, i * 16 + 16)
+    }
+    const mesh = new SkinnedMesh(merged, first.material)
+    mesh.castShadow = first.castShadow
+    mesh.receiveShadow = first.receiveShadow
+    mesh.renderOrder = first.renderOrder
+    mesh.userData.rigidBake = true
+    root.add(mesh)
+    mesh.updateMatrixWorld(true)
+    mesh.bind(skeleton, mesh.matrixWorld)
+    // Culling sphere: where the parts are now, plus room for them to move. margin Infinity = pieces that
+    // travel or grow without bound (they follow the building up): never frustum-culled.
+    if (Number.isFinite(margin)) {
+      merged.computeBoundingSphere()
+      mesh.boundingSphere = new Sphere().copy(merged.boundingSphere)
+      mesh.boundingSphere.radius += margin
+    } else mesh.frustumCulled = false
+    for (const b of bones) {
+      b.layers.mask = 0 // a transform now, drawn by the skinned mesh
+      b.userData.noDetailCull = true
+      b.userData.rigidBone = true
+    }
+    saved += bones.length - 1
+  }
+  return saved
+}
+
+function flipWinding(g) {
+  for (const n in g.attributes) {
+    const a = g.attributes[n]
+    const s = a.itemSize
+    const arr = a.array
+    for (let t = 0; t + 3 * s <= arr.length; t += 3 * s) {
+      for (let k = 0; k < s; k++) {
+        const i1 = t + s + k
+        const i2 = t + 2 * s + k
+        const tmp = arr[i1]
+        arr[i1] = arr[i2]
+        arr[i2] = tmp
+      }
+    }
+  }
 }

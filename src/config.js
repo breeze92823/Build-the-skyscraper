@@ -43,7 +43,12 @@ export const PLAYER_DIMS = { radius: 0.75, height: 1.8 } // capsule the characte
 
 // --- Look ------------------------------------------------------------------
 export const RENDER = { exposure: 1.0 }
-export const FOG = { near: 40, far: 125 } // fully fogged just before CAMERA.far (130), so the cut-off is hidden
+export const FOG = { near: 120, far: 375 } // fully fogged just before CAMERA.far (390), so the cut-off is hidden
+// Screen-size culling (detailCull.js): a part whose on-screen radius is under `px` device pixels is
+// not drawn (it would be at most a pixel or two); inside the fog the limit grows by up to `fogPx`.
+// `hysteresis` x the limit brings it back (no flicker at the edge). Checked every `every` frames; the
+// list of parts is refreshed every `rebuildEvery` s.
+export const DETAIL_CULL = { enabled: true, px: 1, fogPx: 2, hysteresis: 1.2, every: 2, rebuildEvery: 2 }
 // The two lighting moods lighting.js blends between (key N toggles).
 export const TIME_OF_DAY = {
   transition: 2.5, // s to blend day <-> night
@@ -171,7 +176,7 @@ export const CAMERA = {
   shakeDecay: 6, // 1/s a camera shake (shakeCamera) dies away
   fov: 70,
   near: 0.1,
-  far: 130, // short on purpose; the sky dome, stars and clouds are pinned to the far plane (lighting.js pinToFarPlane) so they still show
+  far: 390, // view distance (FOG ends just inside it); the sky dome, stars and clouds are pinned to the far plane (lighting.js pinToFarPlane) so they still show
   startPitch: 0.38, // radians above the horizon (looking down a little on the site)
   minPitch: -0.35,
   maxPitch: 1.25,
@@ -814,7 +819,7 @@ export const ROBOT = {
   foldTime: 0.9, // s vehicle -> robot
   // Driving / walking physics (robotPlayer.js): springs on the body's pitch / roll / heave.
   spring: { k: 90, damp: 11, pitchPerAccel: 0.012, rollPerLateral: 0.006, steer: 0.35, maxSteer: 0.5, flyLean: 0.025, maxFlyLean: 0.55 },
-  fly: { climb: 14, sink: -3.5, accel: 28, maxY: 260 }, // m/s while flying as a jet (hold Jump to climb)
+  fly: { climb: 14, sink: -3.5, dive: -16, accel: 28, maxY: 260 }, // m/s while flying as a jet (hold Jump to climb, hold C / DOWN to dive)
   flyAccel: 26, // m/s^2 toward the climb / sink speed for gear that flies in robot form
   flyMaxY: 240, // m, flying gear stops climbing here
   trail: 0.045, // s between thruster spark bursts

@@ -164,3 +164,18 @@
 .gear-ability .touch-btn.ability {
   display: flex;
 }
+
+/* Dive (C) while flying: left of RUN, only while the worn gear / jet is airborne-capable (body.flying). */
+.touch-btn.down {
+  display: none;
+  left: calc(-1 * (var(--side) + 10px));
+  bottom: calc((var(--jump) - var(--side)) / 2);
+  width: var(--side);
+  height: var(--side);
+  background: rgba(20, 110, 200, 0.6);
+  border-color: rgba(190, 230, 255, 0.8);
+  font-size: clamp(10px, 2.8vmin, 13px);
+}
+.flying .touch-btn.down {
+  display: flex;
+}

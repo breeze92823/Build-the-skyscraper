@@ -56,6 +56,9 @@ import { ICONS } from './hudIcons.js'
 import { pointInPolygon } from './shapes.js'
 import * as S from './stats.js'
 import { createWarmup } from './warmup.js'
+import { createDetailCull } from './detailCull.js'
+import { createLightGate } from './lightGate.js'
+import { bakeRigid } from './bake.js'
 
 const { state } = S
 // Your credit on the tower (the finale's Top Builders, tower.contributors()).
@@ -675,9 +678,9 @@ events.on((ev) => {
 
 // --- Helpers ---------------------------------------------------------------------------------------------------------
 const screen = new Vector3()
-function popAtPlayer(text, color, big = false) {
+function popAtPlayer(text, color, big = false, height = 2.3) {
   const p = player.renderPosition
-  screen.set(p.x, p.y + 2.3, p.z).project(camera)
+  screen.set(p.x, p.y + height, p.z).project(camera)
   if (screen.z > 1) return
   const x = ((screen.x + 1) / 2) * window.innerWidth + (Math.random() - 0.5) * 50
   const y = ((1 - screen.y) / 2) * window.innerHeight
@@ -697,13 +700,27 @@ function blocksPerMinute() {
 }
 
 // Fortune Luck / Golden Touch: a lucky drop pays its coins as cash, with a burst and a floating number.
+// Drops are paid at once but shown batched (one "LUCKY!" pop, burst and sound per window), so fast
+// building never piles up overlapping LUCKY texts on the player.
+let luckyCash = 0
+let luckyCoins = 0
+let luckyT = 0
 function luckyDrop(drop) {
   if (!drop) return
   S.addCash(drop.cash)
-  popAtPlayer(`LUCKY! +$${S.short(drop.cash)}`, '#ffd23a', true)
+  luckyCash += drop.cash
+  luckyCoins += drop.coins
+}
+function tickLucky(dt) {
+  luckyT -= dt
+  if (luckyCash <= 0 || luckyT > 0) return
+  popAtPlayer(`LUCKY! +$${S.short(luckyCash)}`, '#ffd23a', true, 3.1)
   const p = player.renderPosition
-  fx.sparks(p.x, p.y + 2.2, p.z, { count: 14 + Math.min(30, drop.coins * 2), colors: ['#ffd23a', '#fff2a8', '#ffffff'], speed: 5 })
-  game.lucky(drop.coins)
+  fx.sparks(p.x, p.y + 2.2, p.z, { count: 14 + Math.min(30, luckyCoins * 2), colors: ['#ffd23a', '#fff2a8', '#ffffff'], speed: 5 })
+  game.lucky(luckyCoins)
+  luckyCash = 0
+  luckyCoins = 0
+  luckyT = 0.9
 }
 
 // --- Loop ----------------------------------------------------------------------------------------------------------------
@@ -761,8 +778,24 @@ let lastNight = -1
 // world exists (warmup.js); otherwise each one stalls the frame it first comes into view. While playing,
 // warmup.update() warms whatever is added later (gear, pets, other players, the next building) in idle time.
 bloxity.loadingStep('Preparing graphics')
+// Set pieces built from many small parts: every opaque part is merged per material into one skinned
+// mesh whose bones are the parts themselves (bake.js bakeRigid), so they move, hide and animate exactly
+// as before for one draw call per material. Pieces that follow the building up are never frustum-culled.
+// (Not the leaderboard, which swaps materials, nor the gym, whose live parts have their own materials.)
+for (const [name, margin] of [['site', 8], ['pit', 8], ['spinStage', 8], ['elevator', Infinity], ['cranes', Infinity], ['nightLights', Infinity]]) {
+  const piece = scene.getObjectByName(name)
+  if (piece) bakeRigid(piece, margin)
+}
+
+// The lamps / floodlights are switched off as a set while all of them are dark (lightGate.js): roughly
+// half the GPU time by day. Set before the warm-up so it compiles both the day and the night variant.
+const lightGate = createLightGate(scene)
+lightGate.update()
 const warmup = createWarmup(renderer, scene, camera, postfx)
 await warmup.full()
+// Parts too small on screen to matter (under ~a pixel; more inside the fog) are skipped (detailCull.js),
+// which pays for the long view distance.
+const detailCull = createDetailCull(scene, camera, renderer)
 
 // A thrown error must never stop the loop (three.js stops requesting frames when the
 // callback throws): log it once per second and keep going.
@@ -918,6 +951,7 @@ function frame() {
     popAcc = 0
     popT = 0.35
   }
+  tickLucky(dt)
 
   // --- World systems.
   const ride = elevator.update(dt, elapsed, player)
@@ -1097,6 +1131,8 @@ function frame() {
   finale.update(dt) // the Top Builders show drives the camera while it runs
   lighting.update(dt, playerGroup.position)
   nightLights.update(dt, { group: playerGroup, avatar, facing: player.facing, gearOn: state.gear.on })
+  lightGate.update()
+  detailCull.update(dt)
   postfx.render()
   warmup.update(dt)
 
@@ -1175,6 +1211,9 @@ if (import.meta.env.DEV) {
       S.wearGear(id)
     },
     remotes,
+    detailCull,
+    lightGate,
+    robotHall,
     invite, // invite.open() / invite.ready(); net.invite holds the server's view
     emotes, // emotes.playClip({ len, loop, tracks }) plays a clip on your avatar
     reset: () => {
